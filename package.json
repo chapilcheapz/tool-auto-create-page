@@ -1,0 +1,16 @@
+{
+  "name": "tool-auto-create-page",
+  "version": "1.0.0",
+  "description": "Tool tự động tạo Facebook Page",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.0",
+    "playwright": "^1.61.1"
+  }
+}

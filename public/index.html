@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Auto Create Facebook Page</title>
+  <meta name="description" content="Tool tự động tạo Facebook Page nhanh chóng">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="bg-grid"></div>
+  <div class="bg-glow glow-1"></div>
+  <div class="bg-glow glow-2"></div>
+  <div class="bg-glow glow-3"></div>
+
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <div class="logo-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+            <path d="M2 17l10 5 10-5"/>
+            <path d="M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <div>
+          <h1>Auto Page Creator</h1>
+          <p class="subtitle">Facebook Page Auto Tool</p>
+        </div>
+      </div>
+      <div class="status-badge" id="statusBadge">
+        <span class="status-dot"></span>
+        <span>Sẵn sàng</span>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main">
+      <!-- Cookie Section -->
+      <section class="card config-card">
+        <div class="card-header" id="configToggle">
+          <div class="card-title">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+            <span>Cookie Facebook</span>
+          </div>
+          <svg class="chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </div>
+        <div class="card-body config-body" id="configBody">
+          <div class="form-group full-width">
+            <label for="inputCookie">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              </svg>
+              Cookie
+            </label>
+            <textarea id="inputCookie" rows="3" placeholder="Dán cookie từ trình duyệt Facebook vào đây..."></textarea>
+            <p class="hint">Chỉ cần nhập cookie — các token (fb_dtsg, lsd, jazoest...) sẽ được tự động trích xuất khi tạo page.</p>
+          </div>
+
+          <div class="form-actions">
+            <button class="btn btn-secondary" id="btnSaveConfig">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+                <polyline points="17 21 17 13 7 13 7 21"/>
+                <polyline points="7 3 7 8 15 8"/>
+              </svg>
+              Lưu cookie
+            </button>
+            <button class="btn btn-ghost" id="btnClearConfig">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="3 6 5 6 21 6"/>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+              </svg>
+              Xoá
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Action Section -->
+      <section class="card action-card">
+        <div class="card-body">
+          <div class="action-grid">
+            <div class="action-left">
+              <h2>Tạo Page Mới</h2>
+              <p>Nhấn nút để tạo page với tên & bio ngẫu nhiên, hoặc tuỳ chỉnh bên dưới</p>
+              <div class="custom-inputs">
+                <div class="form-group">
+                  <label for="inputPageName">Tên page (để trống = random)</label>
+                  <input type="text" id="inputPageName" placeholder="Để trống để tự tạo ngẫu nhiên...">
+                </div>
+                <div class="form-group">
+                  <label for="inputPageBio">Bio (để trống = random)</label>
+                  <input type="text" id="inputPageBio" placeholder="Để trống để tự tạo ngẫu nhiên...">
+                </div>
+                <div class="form-group">
+                  <label for="inputCategory">Category ID</label>
+                  <input type="text" id="inputCategory" placeholder="2347428775505624" value="2347428775505624">
+                </div>
+              </div>
+            </div>
+            <div class="action-right">
+              <button class="btn-create" id="btnCreatePage">
+                <div class="btn-create-inner">
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="12" y1="5" x2="12" y2="19"/>
+                    <line x1="5" y1="12" x2="19" y2="12"/>
+                  </svg>
+                  <span>Tạo Page</span>
+                </div>
+                <div class="btn-create-loading" style="display:none">
+                  <div class="spinner"></div>
+                  <span>Đang tạo...</span>
+                </div>
+              </button>
+              <div class="stats">
+                <div class="stat">
+                  <span class="stat-value" id="statTotal">0</span>
+                  <span class="stat-label">Tổng</span>
+                </div>
+                <div class="stat">
+                  <span class="stat-value stat-success" id="statSuccess">0</span>
+                  <span class="stat-label">Thành công</span>
+                </div>
+                <div class="stat">
+                  <span class="stat-value stat-fail" id="statFail">0</span>
+                  <span class="stat-label">Thất bại</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Log Section -->
+      <section class="card log-card">
+        <div class="card-header">
+          <div class="card-title">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+              <line x1="16" y1="13" x2="8" y2="13"/>
+              <line x1="16" y1="17" x2="8" y2="17"/>
+              <polyline points="10 9 9 9 8 9"/>
+            </svg>
+            <span>Lịch sử tạo page</span>
+          </div>
+          <button class="btn btn-ghost btn-sm" id="btnClearLog">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="3 6 5 6 21 6"/>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+            </svg>
+            Xoá log
+          </button>
+        </div>
+        <div class="card-body log-body">
+          <div class="log-empty" id="logEmpty">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" opacity="0.3">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+              <line x1="3" y1="9" x2="21" y2="9"/>
+              <line x1="9" y1="21" x2="9" y2="9"/>
+            </svg>
+            <p>Chưa có page nào được tạo</p>
+          </div>
+          <div class="log-table-wrap" id="logTableWrap" style="display:none">
+            <table class="log-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Thời gian</th>
+                  <th>Tên page</th>
+                  <th>Bio</th>
+                  <th>Page ID</th>
+                  <th>Trạng thái</th>
+                </tr>
+              </thead>
+              <tbody id="logTableBody">
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <p>Auto Page Creator Tool &copy; 2026</p>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
