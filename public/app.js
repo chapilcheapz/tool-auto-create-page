@@ -8,7 +8,10 @@ const btnCreatePage = $('#btnCreatePage');
 const btnSaveConfig = $('#btnSaveConfig');
 const btnClearConfig = $('#btnClearConfig');
 const btnClearLog = $('#btnClearLog');
-const configToggle = $('#configToggle');
+const btnOpenSettings = $('#btnOpenSettings');
+const btnCloseSettings = $('#btnCloseSettings');
+const settingsModal = $('#settingsModal');
+const modalOverlay = $('#modalOverlay');
 const logEmpty = $('#logEmpty');
 const logTableWrap = $('#logTableWrap');
 const logTableBody = $('#logTableBody');
@@ -20,10 +23,16 @@ const statFail = $('#statFail');
 let stats = { total: 0, success: 0, fail: 0 };
 let isCreating = false;
 
-// ========= Config Toggle =========
-configToggle.addEventListener('click', () => {
-  const card = configToggle.closest('.config-card');
-  card.classList.toggle('collapsed');
+// ========= Settings Modal Toggle =========
+const openSettings = () => settingsModal.classList.add('active');
+const closeSettings = () => settingsModal.classList.remove('active');
+
+btnOpenSettings.addEventListener('click', openSettings);
+btnCloseSettings.addEventListener('click', closeSettings);
+modalOverlay.addEventListener('click', closeSettings);
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeSettings();
 });
 
 // ========= Save/Load Cookie =========
@@ -32,6 +41,7 @@ btnSaveConfig.addEventListener('click', () => {
   if (cookie) {
     localStorage.setItem('fb_cookie', cookie);
     showToast('Đã lưu cookie!', 'success');
+    closeSettings();
   } else {
     showToast('Cookie trống!', 'error');
   }
@@ -41,6 +51,7 @@ btnClearConfig.addEventListener('click', () => {
   localStorage.removeItem('fb_cookie');
   inputCookie.value = '';
   showToast('Đã xoá cookie', 'success');
+  closeSettings();
 });
 
 // Load saved cookie on start
