@@ -1,5 +1,5 @@
 # Sử dụng image chính thức của Microsoft Playwright đã cài sẵn Chromium và dependencies
-FROM mcr.microsoft.com/playwright:v1.49.0-noble
+FROM mcr.microsoft.com/playwright:v1.61.1-noble
 
 # Thiết lập thư mục làm việc trong container
 WORKDIR /app
