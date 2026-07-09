@@ -149,7 +149,10 @@ async function extractTokens(cookieString) {
   // 4. Nếu HTTP Request thất bại, chạy Playwright Headless Browser làm dự phòng
   let browser = null;
   try {
-    browser = await chromium.launch({ headless: true });
+    browser = await chromium.launch({
+      headless: true,
+      args: ['--disable-gpu', '--mute-audio']
+    });
     const context = await browser.newContext({
       userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36',
       locale: 'vi-VN',

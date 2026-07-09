@@ -163,7 +163,10 @@ async function getFeedbackIdForUrl(postUrl, postId, cookie) {
 
   let browser;
   try {
-    browser = await chromium.launch({ headless: true });
+    browser = await chromium.launch({
+      headless: true,
+      args: ['--disable-gpu', '--mute-audio']
+    });
     const context = await browser.newContext();
 
     // Set cookies for facebook
