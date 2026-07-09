@@ -100,6 +100,5 @@ module.exports = {
   generatePageName,
   generateBio,
   buildCommonParams,
-  buildHeaders,
-  randomItem
+  buildHeaders
 };

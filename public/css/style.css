@@ -66,7 +66,7 @@ body {
 .sidebar {
   width: 280px;
   background: var(--bg-secondary);
-  border-right: 1px solid var(--border);
+  border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   height: 100vh;
@@ -909,10 +909,74 @@ textarea {
   .sidebar {
     width: 100%;
     height: auto;
-    border-right: none;
+    border-left: none;
     border-bottom: 1px solid var(--border);
     position: static;
   }
+}
+
+/* ========= Tab Navigation (Segmented Control) ========= */
+.tab-navigation {
+  display: inline-flex;
+  background: var(--bg-input);
+  padding: 4px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  margin-bottom: 24px;
+  gap: 2px;
+}
+
+.tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.tab-btn svg {
+  opacity: 0.6;
+  transition: opacity var(--transition);
+}
+
+.tab-btn:hover {
+  color: var(--text-primary);
+}
+
+.tab-btn:hover svg {
+  opacity: 0.9;
+}
+
+.tab-btn.active {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  box-shadow: var(--shadow);
+}
+
+.tab-btn.active svg {
+  stroke: var(--text-primary);
+  opacity: 1;
+}
+
+/* ========= Tab Content Transition ========= */
+.tab-content {
+  display: none;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.tab-content.active {
+  display: block;
+  opacity: 1;
+  transform: translateY(0);
 }
 
 
