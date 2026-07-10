@@ -11,9 +11,17 @@ async function login(req, res) {
   }
 
   try {
-    const user = await userService.findUserByUsername(username);
+    let user = await userService.findUserByUsername(username);
+    if (!user) {
+      user = await userService.findUserByEmail(username);
+    }
+
     if (!user) {
       return res.status(401).json({ success: false, error: 'Tài khoản hoặc mật khẩu không chính xác.' });
+    }
+
+    if (user.role !== 'admin') {
+      return res.status(401).json({ success: false, error: 'Tài khoản không có quyền đăng nhập hệ thống.' });
     }
 
     const isMatch = bcrypt.compareSync(password, user.password);
@@ -23,8 +31,9 @@ async function login(req, res) {
 
     // Load custom JWT expiration from environment (e.g. 15m)
     const expiresIn = process.env.JWT_EXPIRES_IN || '15m';
+    const displayUsername = user.username || user.email;
     const token = jwt.sign(
-      { username: user.username },
+      { username: displayUsername },
       getJwtSecret(),
       { expiresIn }
     );
@@ -33,7 +42,7 @@ async function login(req, res) {
       success: true,
       token,
       user: {
-        username: user.username
+        username: displayUsername
       }
     });
   } catch (error) {

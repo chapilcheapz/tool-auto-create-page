@@ -318,8 +318,13 @@
   <!-- Toast Notification Container -->
   <div class="toast-container" id="toastContainer"></div>
 
-  <!-- SideNavBar -->
-  <aside class="fixed left-0 top-0 h-full w-[320px] bg-surface-container-low border-r border-outline-variant flex flex-col p-sm gap-xs z-50">
+  <!-- Mobile Drawer Overlay -->
+  <div id="sidebarOverlay" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 hidden lg:hidden"></div>
+
+  <!-- App Wrapper (Hidden by default for authentication protection) -->
+  <div id="appContainer" class="w-full h-full flex overflow-hidden" style="display: none;">
+    <!-- SideNavBar -->
+    <aside id="leftSidebar" class="fixed left-0 top-0 h-full w-[300px] sm:w-[320px] bg-surface-container-low border-r border-outline-variant flex flex-col p-sm gap-xs z-50 transition-transform duration-300 -translate-x-full lg:translate-x-0">
     <div class="flex items-center gap-sm px-sm py-md">
       <div class="w-10 h-10 rounded-lg bg-primary-container flex items-center justify-center text-on-primary-container shrink-0">
         <span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">auto_awesome</span>
@@ -361,24 +366,33 @@
   </aside>
 
   <!-- Main Content Canvas -->
-  <main class="ml-[320px] mr-[360px] flex-1 flex flex-col h-screen overflow-y-auto">
+  <main class="lg:ml-[320px] lg:mr-[360px] ml-0 mr-0 flex-1 flex flex-col h-screen overflow-y-auto">
     <!-- TopAppBar -->
-    <header class="flex justify-between items-center px-margin py-md w-full sticky top-0 bg-background/80 backdrop-blur-md z-40">
-      <div class="flex items-center gap-sm">
-        <span class="text-headline-sm font-headline-sm text-on-surface font-bold">Trình quản lý</span>
+    <header class="flex justify-between items-center px-sm sm:px-margin py-md w-full sticky top-0 bg-background/80 backdrop-blur-md z-40 border-b border-outline-variant/30">
+      <div class="flex items-center gap-xs sm:gap-sm">
+        <!-- Mobile Left Sidebar Toggle -->
+        <button id="btnToggleLeftSidebar" class="lg:hidden w-10 h-10 flex items-center justify-center rounded-lg hover:bg-surface-container-high text-on-surface transition-colors cursor-pointer bg-transparent border-none">
+          <span class="material-symbols-outlined">menu</span>
+        </button>
+        <span class="text-headline-sm font-headline-sm text-on-surface font-bold truncate">Trình quản lý</span>
       </div>
-      <div class="flex items-center gap-md">
+      <div class="flex items-center gap-xs sm:gap-md">
         <!-- Status Badge -->
-        <div class="flex items-center gap-xs px-sm py-xs bg-surface-container rounded-full border border-outline-variant" id="statusBadge">
+        <div class="hidden sm:flex items-center gap-xs px-sm py-xs bg-surface-container rounded-full border border-outline-variant" id="statusBadge">
           <div class="w-2 h-2 rounded-full bg-secondary"></div>
           <span class="text-label-md font-label-md text-on-surface">Sẵn sàng</span>
         </div>
 
+        <!-- Mobile Right Sidebar Toggle -->
+        <button id="btnToggleRightSidebar" class="lg:hidden w-10 h-10 flex items-center justify-center rounded-lg hover:bg-surface-container-high text-on-surface transition-colors cursor-pointer bg-transparent border-none" title="Danh sách Page">
+          <span class="material-symbols-outlined">list_alt</span>
+        </button>
+
         <!-- User Profile Dropdown Container -->
         <div class="relative" id="profileDropdownContainer">
           <button id="btnProfileToggle" class="flex items-center gap-xs px-sm py-1.5 rounded-full hover:bg-surface-container-high transition-all duration-200 cursor-pointer border-none bg-transparent">
-            <span class="text-body-sm font-semibold text-on-surface select-none">Xin chào Admin</span>
-            <div class="w-8 h-8 rounded-full bg-primary-fixed text-on-primary-fixed flex items-center justify-center font-bold text-sm overflow-hidden select-none border border-outline-variant">
+            <span class="text-body-sm font-semibold text-on-surface select-none" id="headerWelcomeText">Xin chào Admin</span>
+            <div class="w-8 h-8 rounded-full bg-primary-fixed text-on-primary-fixed flex items-center justify-center font-bold text-sm overflow-hidden select-none border border-outline-variant" id="headerUserAvatar">
               A
             </div>
             <span class="material-symbols-outlined text-outline text-[18px] select-none transition-transform duration-200" id="dropdownArrow">expand_more</span>
@@ -388,7 +402,7 @@
           <div id="profileDropdownMenu" class="absolute right-0 mt-xs w-48 glass-effect rounded-xl shadow-xl py-xs border border-outline-variant/30 hidden z-50">
             <div class="px-md py-sm border-b border-outline-variant/30 flex flex-col gap-xs">
               <span class="text-label-sm font-label-sm text-outline uppercase tracking-wider">Thông tin tài khoản</span>
-              <span class="text-body-sm font-semibold text-on-surface truncate">Tài khoản: admin</span>
+              <span class="text-body-sm font-semibold text-on-surface truncate" id="dropdownUsernameText">Tài khoản: admin</span>
             </div>
             <button class="w-full flex items-center gap-sm px-md py-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high rounded-none font-label-md transition-all text-left bg-transparent border-none cursor-pointer" onclick="document.getElementById('btnOpenSettings').click(); document.getElementById('profileDropdownMenu').classList.add('hidden');">
               <span class="material-symbols-outlined text-[18px]">settings</span>
@@ -403,22 +417,23 @@
       </div>
     </header>
 
-    <div class="flex-1 px-margin py-xl flex flex-col gap-lg max-w-6xl mx-auto w-full">
+    <div class="flex-1 px-sm sm:px-margin py-md sm:py-xl flex flex-col gap-lg max-w-6xl mx-auto w-full">
       
       <!-- Tab: Page List (Quản lý Page) -->
       <div class="tab-content active" id="tab-page-list">
         <div class="p-lg glass-effect rounded-xl shadow-xl flex flex-col gap-md">
-          <div class="flex items-center justify-between gap-sm mb-sm border-b border-outline-variant/30 pb-sm">
-            <div>
+          <div class="flex flex-col md:flex-row md:items-center justify-between gap-md mb-sm border-b border-outline-variant/30 pb-sm">
+            <!-- Search field -->
+            <div class="relative w-full md:w-[300px] order-first md:order-last">
+              <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline text-[18px]">search</span>
+              <input class="w-full bg-[#121214] border border-outline-variant rounded-lg pl-9 pr-3 py-xs text-body-sm text-on-surface focus:outline-none focus:border-primary transition-all placeholder:text-outline" id="inputSearchPage" placeholder="Tìm kiếm page..." type="text"/>
+            </div>
+
+            <div class="flex-grow">
               <h2 class="text-headline-md font-headline-md text-on-surface">Danh Sách Page Trong Tài Khoản</h2>
               <p class="text-body-sm font-body-sm text-on-surface-variant">
                 Quản lý các trang Facebook hiện có. Tổng số trang: <span id="centralPagesCount" class="font-bold text-primary">0</span>
               </p>
-            </div>
-            <!-- Search field -->
-            <div class="relative w-[300px]">
-              <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline text-[18px]">search</span>
-              <input class="w-full bg-[#121214] border border-outline-variant rounded-lg pl-9 pr-3 py-xs text-body-sm text-on-surface focus:outline-none focus:border-primary transition-all placeholder:text-outline" id="inputSearchPage" placeholder="Tìm kiếm page..." type="text"/>
             </div>
           </div>
 
@@ -461,7 +476,7 @@
   </main>
 
   <!-- Right Sidebar: Page List -->
-  <aside class="fixed right-0 top-0 h-full w-[360px] bg-surface-container-lowest border-l border-outline-variant flex flex-col z-50">
+  <aside id="rightSidebar" class="fixed right-0 top-0 h-full w-[300px] sm:w-[360px] bg-surface-container-lowest border-l border-outline-variant flex flex-col z-50 transition-transform duration-300 translate-x-full lg:translate-x-0">
     <div class="p-md flex items-center justify-between border-b border-outline-variant">
       <div class="flex items-center gap-xs">
         <span class="material-symbols-outlined text-secondary">list_alt</span>
@@ -507,6 +522,7 @@
       </div>
     </div>
   </aside>
+  </div>
 
   <!-- Settings Modal -->
   <div class="modal" id="settingsModal">
@@ -601,7 +617,7 @@
   </div>
 
   <!-- Login Screen Overlay -->
-  <div class="login-overlay-fullscreen login-page overflow-hidden min-h-screen relative" id="loginOverlay" style="display: none; z-index: 9999;">
+  <div class="login-overlay-fullscreen login-page overflow-hidden min-h-screen relative" id="loginOverlay" style="display: flex; z-index: 9999;">
     <!-- Main Container -->
     <main class="min-h-screen w-full flex items-center justify-center p-6 relative z-10">
       <div class="max-w-[450px] w-full glass-card rounded-[28px] px-10 py-12 shadow-2xl flex flex-col gap-6 text-white text-center select-none">
@@ -630,59 +646,13 @@
                 <input class="rounded border-white/20 text-white focus:ring-0 focus:ring-offset-0 bg-transparent w-4 h-4 cursor-pointer" type="checkbox"/>
                 <span>ghi nhớ đăng nhập</span>
               </label>
-              <a class="hover:text-white transition-colors" href="#">quên mật khẩu?</a>
+              <a class="hover:text-white transition-colors" href="#">Quên mật khẩu?</a>
             </div>
             <div id="loginError" class="login-error-msg" style="display: none; background: rgba(186, 26, 26, 0.2); border: 1px solid rgba(186, 26, 26, 0.4); color: #ffb4ab; padding: 10px 14px; border-radius: 12px; font-size: 0.8rem;"></div>
             <!-- Login Button -->
             <button class="w-full bg-white text-black font-bold py-3.5 rounded-full hover:bg-white/90 active:scale-[0.98] transition-all text-sm mt-2" type="submit" id="btnLoginSubmit">
               đăng nhập
             </button>
-            <!-- Footer Switch -->
-            <div class="text-center text-xs text-white/50 mt-4 pt-2">
-              chưa có tài khoản? <a href="#" id="linkShowRegister" class="text-white font-bold hover:underline">đăng ký</a>
-            </div>
-          </form>
-
-          <!-- Register Form -->
-          <form class="space-y-4" id="registerForm" onsubmit="return false;" style="display: none;">
-            <!-- Username -->
-            <div class="relative">
-              <input class="w-full px-5 py-3 rounded-full border border-white/20 bg-white/5 text-white placeholder-white/40 focus:outline-none focus:border-white/40 focus:bg-white/10 transition-all text-sm outline-none" id="registerUsername" required placeholder="tên tài khoản" type="text" autocomplete="username"/>
-            </div>
-            <!-- Email -->
-            <div class="relative">
-              <input class="w-full px-5 py-3 rounded-full border border-white/20 bg-white/5 text-white placeholder-white/40 focus:outline-none focus:border-white/40 focus:bg-white/10 transition-all text-sm outline-none" id="registerEmail" required placeholder="email công việc" type="email" autocomplete="email"/>
-            </div>
-            <!-- Password -->
-            <div class="relative password-input-wrapper">
-              <input class="w-full pl-5 pr-12 py-3 rounded-full border border-white/20 bg-white/5 text-white placeholder-white/40 focus:outline-none focus:border-white/40 focus:bg-white/10 transition-all text-sm outline-none" id="registerPassword" required placeholder="mật khẩu" type="password" autocomplete="new-password"/>
-              <button class="absolute right-4 top-1/2 -translate-y-1/2 text-white/40 hover:text-white transition-colors btn-toggle-password" type="button" tabindex="-1">
-                <span class="material-symbols-outlined text-[18px]">visibility</span>
-              </button>
-            </div>
-            <!-- Confirm Password -->
-            <div class="relative password-input-wrapper">
-              <input class="w-full pl-5 pr-12 py-3 rounded-full border border-white/20 bg-white/5 text-white placeholder-white/40 focus:outline-none focus:border-white/40 focus:bg-white/10 transition-all text-sm outline-none" id="registerConfirmPassword" required placeholder="nhập lại mật khẩu" type="password" autocomplete="new-password"/>
-              <button class="absolute right-4 top-1/2 -translate-y-1/2 text-white/40 hover:text-white transition-colors btn-toggle-password" type="button" tabindex="-1">
-                <span class="material-symbols-outlined text-[18px]">visibility</span>
-              </button>
-            </div>
-            <!-- Terms Checkbox -->
-            <div class="flex items-start gap-2 text-xs text-white/60 px-1 select-none">
-              <input class="rounded border-white/20 text-white focus:ring-0 focus:ring-offset-0 bg-transparent w-4 h-4 cursor-pointer mt-0.5" id="terms" required type="checkbox"/>
-              <label for="terms" class="cursor-pointer hover:text-white transition-colors leading-tight">
-                tôi đồng ý với <a class="text-white hover:underline font-bold" href="#">điều khoản dịch vụ</a> và <a class="text-white hover:underline font-bold" href="#">chính sách bảo mật</a>.
-              </label>
-            </div>
-            <div id="registerError" class="login-error-msg" style="display: none; background: rgba(186, 26, 26, 0.2); border: 1px solid rgba(186, 26, 26, 0.4); color: #ffb4ab; padding: 10px 14px; border-radius: 12px; font-size: 0.8rem;"></div>
-            <!-- Register Button -->
-            <button class="w-full bg-white text-black font-bold py-3.5 rounded-full hover:bg-white/90 active:scale-[0.98] transition-all text-sm mt-2" type="submit" id="btnRegisterSubmit">
-              đăng ký
-            </button>
-            <!-- Footer Switch -->
-            <div class="text-center text-xs text-white/50 mt-4 pt-2">
-              đã có tài khoản? <a href="#" id="linkShowLogin" class="text-white font-bold hover:underline">đăng nhập</a>
-            </div>
           </form>
         </div>
       </div>

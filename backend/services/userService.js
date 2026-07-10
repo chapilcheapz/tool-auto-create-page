@@ -19,7 +19,8 @@ async function initializeUsers() {
         .insert({
           username: 'admin',
           email: 'admin@example.com',
-          password: defaultPasswordHash
+          password: defaultPasswordHash,
+          role: 'admin'
         });
     }
   } catch (error) {
