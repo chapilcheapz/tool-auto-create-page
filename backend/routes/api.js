@@ -9,7 +9,6 @@ const router = express.Router();
 
 // Authentication routes (unprotected)
 router.post('/auth/login', authController.login);
-router.post('/auth/register', authController.register);
 
 // Protected routes using authMiddleware
 router.use(authMiddleware);

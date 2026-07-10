@@ -98,6 +98,71 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') closeSettings();
 });
 
+// ========= Mobile Drawer Toggle =========
+const btnToggleLeftSidebar = $('#btnToggleLeftSidebar');
+const btnToggleRightSidebar = $('#btnToggleRightSidebar');
+const leftSidebar = $('#leftSidebar');
+const rightSidebar = $('#rightSidebar');
+const sidebarOverlay = $('#sidebarOverlay');
+
+const closeMobileSidebars = () => {
+  if (leftSidebar) {
+    leftSidebar.classList.add('-translate-x-full');
+    leftSidebar.classList.remove('translate-x-0');
+  }
+  if (rightSidebar) {
+    rightSidebar.classList.add('translate-x-full');
+    rightSidebar.classList.remove('translate-x-0');
+  }
+  if (sidebarOverlay) {
+    sidebarOverlay.classList.add('hidden');
+  }
+};
+
+if (btnToggleLeftSidebar && leftSidebar) {
+  btnToggleLeftSidebar.addEventListener('click', (e) => {
+    e.stopPropagation();
+    leftSidebar.classList.toggle('-translate-x-full');
+    leftSidebar.classList.toggle('translate-x-0');
+    
+    // Close other sidebar
+    if (rightSidebar) {
+      rightSidebar.classList.add('translate-x-full');
+      rightSidebar.classList.remove('translate-x-0');
+    }
+    
+    const isOpen = leftSidebar.classList.contains('translate-x-0');
+    if (sidebarOverlay) {
+      if (isOpen) sidebarOverlay.classList.remove('hidden');
+      else sidebarOverlay.classList.add('hidden');
+    }
+  });
+}
+
+if (btnToggleRightSidebar && rightSidebar) {
+  btnToggleRightSidebar.addEventListener('click', (e) => {
+    e.stopPropagation();
+    rightSidebar.classList.toggle('translate-x-full');
+    rightSidebar.classList.toggle('translate-x-0');
+    
+    // Close other sidebar
+    if (leftSidebar) {
+      leftSidebar.classList.add('-translate-x-full');
+      leftSidebar.classList.remove('translate-x-0');
+    }
+    
+    const isOpen = rightSidebar.classList.contains('translate-x-0');
+    if (sidebarOverlay) {
+      if (isOpen) sidebarOverlay.classList.remove('hidden');
+      else sidebarOverlay.classList.add('hidden');
+    }
+  });
+}
+
+if (sidebarOverlay) {
+  sidebarOverlay.addEventListener('click', closeMobileSidebars);
+}
+
 // ========= Profile Dropdown Toggle =========
 const btnProfileToggle = $('#btnProfileToggle');
 const profileDropdownMenu = $('#profileDropdownMenu');
@@ -306,23 +371,13 @@ if (btnClearLog) {
 }
 
 // ========= DOM Elements for Auth =========
+const appContainer = $('#appContainer');
 const loginOverlay = $('#loginOverlay');
 const loginForm = $('#loginForm');
 const loginUsername = $('#loginUsername');
 const loginPassword = $('#loginPassword');
 const loginError = $('#loginError');
 const authTitle = $('#authTitle');
-
-const registerForm = $('#registerForm');
-const registerUsername = $('#registerUsername');
-const registerEmail = $('#registerEmail');
-const registerPassword = $('#registerPassword');
-const registerConfirmPassword = $('#registerConfirmPassword');
-const registerError = $('#registerError');
-const termsCheckbox = $('#terms');
-
-const linkShowRegister = $('#linkShowRegister');
-const linkShowLogin = $('#linkShowLogin');
 
 const changePasswordForm = $('#changePasswordForm');
 const currentPassword = $('#currentPassword');
@@ -335,7 +390,6 @@ const changePasswordError = $('#changePasswordError');
 function showLoginScreen() {
   loginOverlay.style.display = 'flex';
   loginForm.style.display = 'block';
-  registerForm.style.display = 'none';
   if (authTitle) authTitle.textContent = 'đăng nhập';
   loginUsername.value = '';
   loginPassword.value = '';
@@ -346,36 +400,14 @@ function showLoginScreen() {
   pagesList.innerHTML = '';
   pagesList.style.display = 'none';
   pagesListEmpty.style.display = 'flex';
+
+  if (appContainer) appContainer.style.display = 'none';
 }
 
 function hideLoginScreen() {
   loginOverlay.style.display = 'none';
+  if (appContainer) appContainer.style.display = 'flex';
 }
-
-// Toggle between Login and Register views
-linkShowRegister.addEventListener('click', (e) => {
-  e.preventDefault();
-  loginForm.style.display = 'none';
-  registerForm.style.display = 'block';
-  if (authTitle) authTitle.textContent = 'đăng ký';
-  registerError.style.display = 'none';
-  registerUsername.value = '';
-  registerEmail.value = '';
-  registerPassword.value = '';
-  registerConfirmPassword.value = '';
-  if (termsCheckbox) termsCheckbox.checked = false;
-});
-
-linkShowLogin.addEventListener('click', (e) => {
-  e.preventDefault();
-  registerForm.style.display = 'none';
-  loginForm.style.display = 'block';
-  if (authTitle) authTitle.textContent = 'đăng nhập';
-  loginError.style.display = 'none';
-  loginUsername.value = '';
-  loginPassword.value = '';
-  registerEmail.value = '';
-});
 
 // Handle login submission
 loginForm.addEventListener('submit', async (e) => {
@@ -393,6 +425,7 @@ loginForm.addEventListener('submit', async (e) => {
     const result = await api.login(username, password);
     if (result.success && result.token) {
       localStorage.setItem('jwt_token', result.token);
+      localStorage.setItem('username', username);
       hideLoginScreen();
       showToast('Đăng nhập thành công!', 'success');
       await init();
@@ -406,86 +439,11 @@ loginForm.addEventListener('submit', async (e) => {
   }
 });
 
-// Handle registration submission
-registerForm.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  registerError.style.display = 'none';
-  
-  const username = registerUsername.value.trim();
-  const email = registerEmail.value.trim();
-  const password = registerPassword.value.trim();
-  const confirm = registerConfirmPassword.value.trim();
-  
-  if (!username || !email || !password || !confirm) {
-    registerError.textContent = 'Vui lòng điền đầy đủ các thông tin đăng ký.';
-    registerError.style.display = 'block';
-    return;
-  }
-
-  // Client-side email format validation
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRegex.test(email)) {
-    registerError.textContent = 'Định dạng email không hợp lệ (Ví dụ: user@example.com).';
-    registerError.style.display = 'block';
-    return;
-  }
-  
-  if (password.length < 4) {
-    registerError.textContent = 'Mật khẩu phải dài tối thiểu 4 ký tự.';
-    registerError.style.display = 'block';
-    return;
-  }
-  
-  if (password !== confirm) {
-    registerError.textContent = 'Mật khẩu và xác nhận mật khẩu không khớp.';
-    registerError.style.display = 'block';
-    return;
-  }
-
-  // Verify terms checkbox is checked
-  if (termsCheckbox && !termsCheckbox.checked) {
-    registerError.textContent = 'Bạn phải đồng ý với Điều khoản dịch vụ và Chính sách bảo mật.';
-    registerError.style.display = 'block';
-    return;
-  }
-  
-  // Disable button and show spinner
-  const submitBtn = $('#btnRegisterSubmit');
-  const originalBtnHTML = submitBtn.innerHTML;
-  submitBtn.disabled = true;
-  submitBtn.innerHTML = `<span class="animate-spin material-symbols-outlined">progress_activity</span> Đang xử lý...`;
-
-  try {
-    const result = await api.register(username, email, password);
-    if (result.success) {
-      showToast('Đăng ký tài khoản thành công! Hãy đăng nhập.', 'success');
-      
-      // Auto-switch to login view and prefill username
-      registerForm.style.display = 'none';
-      loginForm.style.display = 'block';
-      if (authTitle) authTitle.textContent = 'đăng nhập';
-      loginUsername.value = username;
-      loginPassword.value = '';
-      registerEmail.value = '';
-      if (termsCheckbox) termsCheckbox.checked = false;
-      loginPassword.focus();
-    } else {
-      registerError.textContent = result.error || 'Lỗi đăng ký tài khoản.';
-      registerError.style.display = 'block';
-    }
-  } catch (error) {
-    registerError.textContent = error.message || 'Lỗi kết nối đến máy chủ.';
-    registerError.style.display = 'block';
-  } finally {
-    submitBtn.disabled = false;
-    submitBtn.innerHTML = originalBtnHTML;
-  }
-});
-
 // Handle logout
 document.querySelectorAll('.btn-logout-trigger').forEach(btn => {
   btn.addEventListener('click', () => {
     localStorage.removeItem('jwt_token');
+    localStorage.removeItem('username');
     showLoginScreen();
     showToast('Đã đăng xuất.', 'success');
   });
@@ -564,6 +522,15 @@ async function init() {
   }
   
   hideLoginScreen();
+
+  // Update welcome text and avatar with logged-in username
+  const loggedUsername = localStorage.getItem('username') || 'Admin';
+  const headerWelcomeText = $('#headerWelcomeText');
+  const headerUserAvatar = $('#headerUserAvatar');
+  const dropdownUsernameText = $('#dropdownUsernameText');
+  if (headerWelcomeText) headerWelcomeText.textContent = `Xin chào ${loggedUsername}`;
+  if (headerUserAvatar) headerUserAvatar.textContent = loggedUsername.charAt(0).toUpperCase();
+  if (dropdownUsernameText) dropdownUsernameText.textContent = `Tài khoản: ${loggedUsername}`;
 
   // Restore persistent logs/stats sessions
   pageManager.restoreCreatorSession(stats, { ...uiStatsElements, ...uiLogsElements });
