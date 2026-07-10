@@ -1,33 +1,45 @@
-const fs = require('fs');
-const path = require('path');
+const supabase = require('../utils/supabase');
 
-const CONFIG_FILE = path.join(__dirname, '../../config.json');
-
-function readConfig() {
+async function readConfig() {
   try {
-    if (fs.existsSync(CONFIG_FILE)) {
-      const data = fs.readFileSync(CONFIG_FILE, 'utf8');
-      const config = JSON.parse(data);
-      return { cookie: config.cookie || '' };
+    const { data, error } = await supabase
+      .from('configs')
+      .select('value')
+      .eq('key', 'cookie')
+      .single();
+    
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return { cookie: '' };
+      }
+      throw error;
     }
+    
+    return { cookie: data ? data.value : '' };
   } catch (e) {
-    console.error('Lỗi đọc file cấu hình config.json:', e.message);
+    return { cookie: '' };
   }
-  return { cookie: '' };
 }
 
-function writeConfig(cookieValue) {
+async function writeConfig(cookieValue) {
   try {
-    const configData = { cookie: cookieValue || '' };
-    fs.writeFileSync(CONFIG_FILE, JSON.stringify(configData, null, 2), 'utf8');
+    const { error } = await supabase
+      .from('configs')
+      .upsert({ key: 'cookie', value: cookieValue || '', updated_at: new Date().toISOString() });
+    
+    if (error) throw error;
     return { success: true };
   } catch (e) {
-    console.error('Lỗi ghi file cấu hình config.json:', e.message);
-    throw new Error('Không thể ghi file cấu hình config.json');
+    throw new Error('Không thể lưu cấu hình lên Supabase: ' + e.message);
   }
+}
+
+function getJwtSecret() {
+  return process.env.JWT_SECRET || 'fallback_super_secret_key_12345';
 }
 
 module.exports = {
   readConfig,
-  writeConfig
+  writeConfig,
+  getJwtSecret
 };

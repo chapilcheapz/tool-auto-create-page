@@ -33,18 +33,19 @@ export function escapeHtml(str) {
 
 export function updateStats(stats, elements) {
   const { statTotal, statSuccess, statFail } = elements;
-  statTotal.textContent = stats.total;
-  statSuccess.textContent = stats.success;
-  statFail.textContent = stats.fail;
+  if (statTotal) statTotal.textContent = stats.total;
+  if (statSuccess) statSuccess.textContent = stats.success;
+  if (statFail) statFail.textContent = stats.fail;
 }
 
 export function addLogEntry(data, totalIndex, elements) {
   const { logEmpty, logTableWrap, logTableBody } = elements;
-  logEmpty.style.display = 'none';
-  logTableWrap.style.display = 'block';
+  if (!logTableBody) return;
+  if (logEmpty) logEmpty.style.display = 'none';
+  if (logTableWrap) logTableWrap.style.display = 'block';
 
   const row = document.createElement('tr');
-  const time = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const time = data.time || new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
   const isSuccess = data.success;
   const pageIdCell = data.pageId
@@ -69,14 +70,16 @@ export function addLogEntry(data, totalIndex, elements) {
 
 export function clearLogs(elements, statsObj) {
   const { logEmpty, logTableWrap, logTableBody, statTotal, statSuccess, statFail } = elements;
-  logTableBody.innerHTML = '';
-  logEmpty.style.display = 'flex';
-  logTableWrap.style.display = 'none';
+  if (logTableBody) logTableBody.innerHTML = '';
+  if (logEmpty) logEmpty.style.display = 'flex';
+  if (logTableWrap) logTableWrap.style.display = 'none';
   
   statsObj.total = 0;
   statsObj.success = 0;
   statsObj.fail = 0;
   
   updateStats(statsObj, { statTotal, statSuccess, statFail });
+  sessionStorage.removeItem('session_creator_stats');
+  sessionStorage.removeItem('session_creator_logs');
   showToast('Đã xoá log', 'success');
 }

@@ -74,6 +74,16 @@ export async function startReact(inputCookie, inputs, elements, openSettings) {
       statReactSuccess.textContent = successCount;
       statReactFail.textContent = failCount;
 
+      // Save react session state
+      const reactSession = {
+        postId: result.postId,
+        total: result.totalRun,
+        success: successCount,
+        fail: failCount,
+        logHtml: reactProgressLog.innerHTML
+      };
+      sessionStorage.setItem('session_react_campaign', JSON.stringify(reactSession));
+
       showToast(`Đã hoàn thành thả cảm xúc bài viết!`, 'success');
     } else {
       reactProgressLog.innerHTML += `<div style="color:var(--error)">[Lỗi] ${result.error || 'Có lỗi xảy ra'}</div>`;
@@ -86,5 +96,23 @@ export async function startReact(inputCookie, inputs, elements, openSettings) {
     btnStartReact.classList.remove('loading');
     inner.style.display = 'flex';
     loading.style.display = 'none';
+  }
+}
+
+export function restoreReactSession(elements) {
+  const { statReactTotal, statReactSuccess, statReactFail, reactProgressBox, reactProgressLog } = elements;
+  if (!reactProgressLog) return;
+  try {
+    const saved = sessionStorage.getItem('session_react_campaign');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (statReactTotal) statReactTotal.textContent = parsed.total;
+      if (statReactSuccess) statReactSuccess.textContent = parsed.success;
+      if (statReactFail) statReactFail.textContent = parsed.fail;
+      reactProgressLog.innerHTML = parsed.logHtml;
+      reactProgressBox.style.display = 'block';
+    }
+  } catch (e) {
+    console.error('Lỗi khôi phục react session:', e);
   }
 }
