@@ -2,11 +2,10 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 
-// Initialize user database
-require('./backend/services/userService');
+const { initializeUsers } = require('./backend/services/userService');
 
 const app = express();
-const PORT = 3456;
+const PORT = process.env.PORT || 3456;
 
 // Middlewares
 app.use(cors());
@@ -26,7 +25,20 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'build', 'index.html'));
 });
 
-// Launch server
-app.listen(PORT, () => {
-  console.log(`\n🚀 Server đang chạy tại: http://localhost:${PORT}\n`);
-});
+// Khởi chạy server an toàn
+async function startServer() {
+  try {
+    // Giới hạn thời gian chờ khởi tạo Supabase tối đa 3 giây để tránh treo port
+    const timeout = new Promise((resolve) => setTimeout(() => resolve('timeout'), 3000));
+    await Promise.race([initializeUsers(), timeout]);
+  } catch (error) {
+    // Bỏ qua lỗi khởi tạo để tiếp tục chạy server
+  }
+
+  app.listen(PORT, () => {
+    console.log(`\n🚀 Server đang chạy tại cổng: ${PORT}\n`);
+  });
+}
+
+startServer();
+
