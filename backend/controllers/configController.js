@@ -246,8 +246,9 @@ async function fbLogin(req, res) {
   try {
     console.log('[FB-Login] Đang khởi động trình duyệt...');
     context = await chromium.launchPersistentContext(profilePath, {
-      headless: false,
+      headless: true,
       ignoreDefaultArgs: ['--enable-automation'],
+
       args: [
         '--disable-gpu',
         '--mute-audio',
