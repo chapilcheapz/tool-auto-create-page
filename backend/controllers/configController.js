@@ -68,96 +68,233 @@ async function saveConfig(req, res) {
   }
 }
 
+async function waitForFacebookAuthentication(page, context) {
+  const timeout = 300000;
+  const startedAt = Date.now();
+
+  let captchaDetected = false;
+
+  while (Date.now() - startedAt < timeout) {
+    const captchaVisible = await page
+      .locator('iframe#captcha-recaptcha')
+      .isVisible()
+      .catch(() => false);
+
+    if (captchaVisible && !captchaDetected) {
+      captchaDetected = true;
+
+      console.log(
+        '[FB-Login] Facebook yêu cầu CAPTCHA hình ảnh.'
+      );
+
+      console.log(
+        '[FB-Login] Hãy tự hoàn thành CAPTCHA trong cửa sổ trình duyệt.'
+      );
+
+      await page.bringToFront();
+    }
+
+    const cookies = await context.cookies(
+      'https://www.facebook.com'
+    );
+
+    const cUser = cookies.find(
+      cookie => cookie.name === 'c_user'
+    );
+
+    const xs = cookies.find(
+      cookie => cookie.name === 'xs'
+    );
+
+    if (cUser && xs) {
+      console.log(
+        '[FB-Login] Facebook đã tạo phiên đăng nhập.'
+      );
+
+      return {
+        success: true,
+        captchaDetected,
+        cookies,
+      };
+    }
+
+    const currentUrl = new URL(page.url());
+
+    const isLoginPage =
+      currentUrl.pathname.includes('/login');
+
+    const isCheckpoint =
+      currentUrl.pathname.includes('/checkpoint');
+
+    const isVerification =
+      currentUrl.pathname.includes(
+        '/two_step_verification'
+      );
+
+    if (
+      !captchaVisible &&
+      !isLoginPage &&
+      !isCheckpoint &&
+      !isVerification
+    ) {
+      await page.waitForTimeout(2000);
+
+      const updatedCookies =
+        await context.cookies(
+          'https://www.facebook.com'
+        );
+
+      const updatedCUser =
+        updatedCookies.find(
+          cookie => cookie.name === 'c_user'
+        );
+
+      const updatedXs =
+        updatedCookies.find(
+          cookie => cookie.name === 'xs'
+        );
+
+      if (updatedCUser && updatedXs) {
+        return {
+          success: true,
+          captchaDetected,
+          cookies: updatedCookies,
+        };
+      }
+    }
+
+    console.log(
+      '[FB-Login] Đang chờ xác minh tại:',
+      currentUrl.pathname
+    );
+
+    await page.waitForTimeout(1000);
+  }
+
+  const error = new Error(
+    captchaDetected
+      ? 'Hết thời gian chờ người dùng hoàn thành CAPTCHA.'
+      : 'Hết thời gian chờ Facebook hoàn tất đăng nhập.'
+  );
+
+  error.code = captchaDetected
+    ? 'FB_CAPTCHA_TIMEOUT'
+    : 'FB_LOGIN_TIMEOUT';
+
+  throw error;
+}
+
 async function fbLogin(req, res) {
   const { username, password, twoFactorSecret } = req.body;
   if (!username || !password) {
     return res.status(400).json({ success: false, error: 'Vui lòng cung cấp tài khoản và mật khẩu Facebook.' });
   }
 
-  let browser = null;
+  console.log(`[FB-Login] Bắt đầu tiến trình đăng nhập cho tài khoản: ${username}`);
+  
+  const email = username;
+  const path = require('path');
+  const profilePath = path.resolve(process.cwd(), 'storage/facebook-browser-profile');
+  
+  let context = null;
   try {
-    browser = await chromium.launch({
-      headless: true,
+    console.log('[FB-Login] Đang khởi động trình duyệt giả lập với Persistent Context...');
+    context = await chromium.launchPersistentContext(profilePath, {
+      headless: false,
+      ignoreDefaultArgs: ['--enable-automation'],
       args: [
         '--disable-gpu',
         '--mute-audio',
         '--no-sandbox',
-        '--disable-setuid-sandbox'
-      ]
+        '--disable-setuid-sandbox',
+        '--disable-blink-features=AutomationControlled'
+      ],
+      viewport: { width: 1280, height: 900 }
     });
-    const context = await browser.newContext({
-      userAgent: 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
-      locale: 'vi-VN',
-      viewport: { width: 375, height: 812 }
-    });
-    const page = await context.newPage();
 
-    // 1. Navigate to mbasic login screen
-    await page.goto('https://mbasic.facebook.com/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    const pages = context.pages();
+    const page = pages[0] || await context.newPage();
 
-    // 2. Fill login details
-    await page.fill('input[name="email"]', username);
-    await page.fill('input[name="pass"]', password);
-    await page.click('input[type="submit"], input[name="login"]');
-    await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 });
+    console.log('[FB-Login] Đang điều hướng đến trang facebook.com...');
+    await page.goto('https://www.facebook.com/', { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-    // 3. Handle 2FA prompt
-    let url = page.url();
-    if (url.includes('checkpoint') || (await page.locator('input[name="approvals_code"]').count()) > 0) {
-      if (!twoFactorSecret) {
-        throw new Error('Tài khoản yêu cầu xác thực 2 lớp. Vui lòng điền mã khóa 2FA.');
+    console.log('[FB-Login] Đang kiểm tra hộp thoại Cookie Consent...');
+    try {
+      const cookieAcceptBtn = page.locator('button[data-cookiebanner="accept_button"], button[data-testid="cookie-policy-manage-dialog-accept-button"]');
+      if (await cookieAcceptBtn.count() > 0) {
+        console.log('[FB-Login] Phát hiện banner chấp nhận Cookie. Đang click đồng ý...');
+        await cookieAcceptBtn.first().click();
+        await page.waitForTimeout(1000);
+      } else {
+        console.log('[FB-Login] Không phát hiện banner Cookie.');
       }
-      const otpCode = generateTOTP(twoFactorSecret);
-      if (!otpCode) {
-        throw new Error('Không thể tạo mã OTP từ mã khóa 2FA đã nhập.');
-      }
-      await page.fill('input[name="approvals_code"]', otpCode);
-      await page.click('input[type="submit"], input[name="submit[Submit Code]"]');
-      await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 });
-
-      // Save browser option if prompted
-      if (page.url().includes('checkpoint') && (await page.locator('input[value="save_device"]').count()) > 0) {
-        await page.check('input[value="save_device"]');
-        await page.click('input[type="submit"]');
-        await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 });
-      }
-
-      // Checkpoint continue checks
-      let continueBtn = page.locator('input[type="submit"], input[name="submit[Continue]"]');
-      let limit = 0;
-      while (page.url().includes('checkpoint') && (await continueBtn.count()) > 0 && limit < 5) {
-        await continueBtn.first().click();
-        await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 });
-        limit++;
-      }
+    } catch (e) {
+      console.log('[FB-Login] Lỗi khi xử lý banner Cookie:', e.message);
     }
 
-    // 4. Retrieve cookies
-    const cookies = await context.cookies();
-    const cUser = cookies.find(c => c.name === 'c_user');
-    const xs = cookies.find(c => c.name === 'xs');
+    console.log('[FB-Login] Đang điền thông tin đăng nhập (email và password)...');
+    await page.locator('input[name="email"]').fill(email);
+    await page.locator('input[name="pass"]').fill(password);
+
+    console.log('[FB-Login] Đang tìm kiếm nút Đăng nhập...');
+    const loginButton = page.getByRole('button', {
+      name: 'Đăng nhập',
+      exact: true,
+    });
+
+    if (await loginButton.isVisible().catch(() => false)) {
+      await loginButton.click();
+    } else {
+      await page.locator('input[name="pass"]').press('Enter');
+    }
+
+    console.log('[FB-Login] Bắt đầu luồng kiểm tra và chờ xác thực...');
+    const loginResult = await waitForFacebookAuthentication(page, context);
+
+    const safeUrl = new URL(page.url());
+    console.log('[FB-Login] Trang hiện tại:', safeUrl.pathname);
+
+    const cUser = loginResult.cookies.find(cookie => cookie.name === 'c_user');
+    const xs = loginResult.cookies.find(cookie => cookie.name === 'xs');
 
     if (!cUser || !xs) {
-      if (page.url().includes('checkpoint')) {
-        throw new Error('Tài khoản bị yêu cầu phê duyệt checkpoint. Vui lòng tự đăng nhập trên trình duyệt để xác minh.');
-      }
-      throw new Error('Đăng nhập thất bại. Vui lòng kiểm tra lại tài khoản, mật khẩu hoặc mã khóa 2FA.');
+      const error = new Error('Facebook chưa tạo phiên đăng nhập hoàn chỉnh.');
+      error.code = 'FB_LOGIN_NOT_COMPLETED';
+      throw error;
     }
 
-    // Format cookie string
-    const cookieString = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+    console.log(`[FB-Login] Đăng nhập thành công! c_user = ${cUser.value}`);
+    const cookieString = loginResult.cookies.map(c => `${c.name}=${c.value}`).join('; ');
     
-    // Save config & clear cache
     await writeConfig(cookieString);
     clearUserCache();
 
+    console.log('[FB-Login] Đã lưu cấu hình cookie thành công.');
     return res.json({ success: true, cookie: cookieString });
 
   } catch (error) {
-    console.error('Playwright auto-login error:', error.message);
+    console.error('[FB-Login ERROR] Chi tiết lỗi đăng nhập:', error);
+    if (error.code === 'FB_CAPTCHA_TIMEOUT') {
+      return res.status(408).json({
+        success: false,
+        code: 'FB_CAPTCHA_TIMEOUT',
+        requiresManualVerification: true,
+        message: 'Hết thời gian chờ hoàn thành CAPTCHA Facebook.',
+      });
+    }
+    if (error.code === 'FB_LOGIN_TIMEOUT' || error.code === 'FB_LOGIN_NOT_COMPLETED') {
+      return res.status(409).json({
+        success: false,
+        code: error.code,
+        message: error.message,
+      });
+    }
     return res.status(500).json({ success: false, error: error.message });
   } finally {
-    if (browser) await browser.close();
+    if (context) {
+      console.log('[FB-Login] Đang đóng trình duyệt giả lập...');
+      await context.close();
+    }
   }
 }
 
