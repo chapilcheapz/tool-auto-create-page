@@ -181,37 +181,44 @@ export default function App() {
                 return match ? match[1] : null;
               };
               const fbUid = getFbUid(cookie);
-              const sysUser = localStorage.getItem('username') || 'Admin';
+              
+              if (!fbUid) return null; // Ẩn hoàn toàn nếu chưa có tài khoản Facebook
               
               return (
                 <div 
-                  className="w-10 h-10 rounded-xl bg-[var(--active-menu-bg)] border border-[var(--active-menu-border)] flex items-center justify-center overflow-hidden shrink-0 transition-transform duration-200 hover:scale-105 shadow-sm"
-                  title={fbUid ? `UID Facebook: ${fbUid}` : `Tài khoản: ${sysUser}`}
+                  className="w-10 h-10 rounded-full bg-[var(--active-menu-bg)] border-2 border-[var(--active-menu-border)] flex items-center justify-center overflow-hidden shrink-0 transition-transform duration-200 hover:scale-105 shadow-sm"
+                  title={`UID Facebook: ${fbUid}`}
                 >
-                  {fbUid ? (
-                    <img 
-                      src={`https://graph.facebook.com/${fbUid}/picture?type=square&width=100&height=100`} 
-                      alt="FB Profile" 
-                      className="w-full h-full object-cover rounded-xl"
-                      onError={(e) => {
-                        e.target.onerror = null;
-                        e.target.src = `https://api.dicebear.com/7.x/initials/svg?seed=${sysUser}`;
-                      }}
-                    />
-                  ) : (
-                    <span className="text-sm font-bold text-[var(--text-main)] uppercase">
-                      {sysUser.charAt(0)}
-                    </span>
-                  )}
+                  <img 
+                    src={`/api/config/fb-avatar?t=${Date.now()}`} 
+                    alt="FB Profile" 
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      e.target.onerror = null;
+                      e.target.src = `https://api.dicebear.com/7.x/initials/svg?seed=${fbUid}`;
+                    }}
+                  />
                 </div>
               );
             })()}
 
             {/* Ready Status Badge */}
-            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-[var(--active-menu-bg)] rounded-full border border-[var(--active-menu-border)]">
-              <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
-              <span className="text-xs font-semibold text-[var(--text-main)]">Sẵn sàng</span>
-            </div>
+            {(() => {
+              const hasFbAccount = (() => {
+                if (!cookie) return false;
+                return /c_user=\d+/.test(cookie);
+              })();
+              
+              return (
+                <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-[var(--active-menu-bg)] rounded-full border border-[var(--active-menu-border)]">
+                  <div className={`w-2 h-2 rounded-full ${hasFbAccount ? 'bg-emerald-500' : 'bg-rose-500'}`}></div>
+                  <span className="text-xs font-semibold text-[var(--text-main)]">
+                    {hasFbAccount ? 'Sẵn sàng' : 'Chưa cấu hình'}
+                  </span>
+                </div>
+              );
+            })()}
+
           </div>
         </header>
 

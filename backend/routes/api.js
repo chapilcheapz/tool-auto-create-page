@@ -7,8 +7,10 @@ const authMiddleware = require('../utils/authMiddleware');
 
 const router = express.Router();
 
-// Authentication routes (unprotected)
+// Unprotected routes for browser image tags
 router.post('/auth/login', authController.login);
+router.get('/config/fb-avatar', configController.getFbAvatar);
+router.get('/config/fb-verification-screenshot', configController.getVerificationScreenshot);
 
 // Protected routes using authMiddleware
 router.use(authMiddleware);
@@ -17,6 +19,10 @@ router.use(authMiddleware);
 router.get('/config', configController.getConfig);
 router.post('/config', configController.saveConfig);
 router.post('/config/fb-login', configController.fbLogin);
+router.get('/config/fb-verification-status', configController.getVerificationStatus);
+router.post('/config/fb-verification-submit', configController.submitVerificationCode);
+router.post('/config/fb-verification-click', configController.handleVerificationClick);
+
 
 // Page routes
 router.post('/get-pages', pageController.fetchPages);

@@ -2,7 +2,7 @@ node_modules/
 config.json
 .DS_Store
 .env
-storage/facebook-browser-profile/
+storage/
 build/
 *.log
 .vscode/

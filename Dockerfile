@@ -26,6 +26,9 @@ COPY frontend/package*.json ./frontend/
 # Bỏ qua việc tải xuống trình duyệt mới của Playwright vì image đã tích hợp sẵn trình duyệt tối ưu
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
+# Cài Xvfb (để chạy trình duyệt headless: false trên server không có màn hình)
+RUN apt-get update && apt-get install -y xvfb && rm -rf /var/lib/apt/lists/*
+
 # Chỉ cài đặt production dependencies để tối ưu dung lượng
 RUN npm install --omit=dev
 
@@ -38,5 +41,5 @@ COPY --from=builder /app/build ./build
 # Mở cổng kết nối (Port 3456)
 EXPOSE 3456
 
-# Khởi chạy server backend Express
-CMD ["node", "server.js"]
+# Khởi chạy server qua xvfb-run (để Playwright hoạt động được với headless: false trên server không có GUI)
+CMD ["xvfb-run", "--auto-servernum", "--server-args=-screen 0 1280x900x24", "node", "server.js"]
