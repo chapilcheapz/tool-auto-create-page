@@ -6,4 +6,4 @@ config.json
 Dockerfile
 .DS_Store
 *.log
-frontend/
+frontend/node_modules/
