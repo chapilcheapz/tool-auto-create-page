@@ -4,6 +4,15 @@ const path = require('path');
 
 const { initializeUsers } = require('./backend/services/userService');
 
+// Thêm error handlers toàn cục để không bao giờ bị crash im lặng
+process.on('uncaughtException', (err) => {
+  console.error('❌ Lỗi không được bắt (uncaughtException):', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Lỗi Promise không được xử lý (unhandledRejection):', reason);
+});
+
 const app = express();
 const PORT = process.env.PORT || 3456;
 
@@ -12,8 +21,20 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'build')));
 
-// Mount API router
-app.use('/api', require('./backend/routes/api'));
+// Mount API router với cơ chế try-catch an toàn
+try {
+  const apiRouter = require('./backend/routes/api');
+  app.use('/api', apiRouter);
+} catch (err) {
+  console.error('❌ Lỗi nghiêm trọng khi load API routes:', err);
+  app.use('/api/*', (req, res) => {
+    res.status(500).json({ 
+      success: false, 
+      error: 'API routes failed to load: ' + err.message 
+    });
+  });
+}
+
 
 // Health check
 app.get('/api/status', (req, res) => {
