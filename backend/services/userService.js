@@ -115,10 +115,8 @@ async function createUser(username, email, password) {
   }
 }
 
-// Trigger validation & seeding on module load
-initializeUsers();
-
 module.exports = {
+  initializeUsers,
   getUsers,
   findUserByUsername,
   findUserByEmail,
