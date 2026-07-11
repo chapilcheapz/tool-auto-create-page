@@ -1,5 +1,53 @@
 @import "tailwindcss";
 
+:root {
+  --bg-main: #000000;
+  --bg-sidebar: #070707;
+  --border-main: #18181b;
+  --text-main: #f4f4f5;
+  --text-muted: #71717a;
+  --glass-bg: rgba(255, 255, 255, 0.035);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --btn-cta-bg: #f4f4f5;
+  --btn-cta-text: #09090b;
+  --btn-sec-bg: #18181b;
+  --btn-sec-text: #e4e4e7;
+  --btn-sec-border: rgba(255, 255, 255, 0.05);
+  --active-menu-bg: rgba(255, 255, 255, 0.1);
+  --active-menu-border: rgba(255, 255, 255, 0.1);
+  --active-menu-text: #ffffff;
+  --input-bg: rgba(0, 0, 0, 0.4);
+  --input-border: #18181b;
+  --header-bg: rgba(0, 0, 0, 0.8);
+  --table-bg: rgba(255, 255, 255, 0.02);
+  --table-border: #18181b;
+  --table-row-hover: rgba(255, 255, 255, 0.02);
+}
+
+html.light {
+  --bg-main: #f8fafc;
+  --bg-sidebar: #ffffff;
+  --border-main: #e2e8f0;
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+  --glass-bg: #ffffff;
+  --glass-border: #e2e8f0;
+  --btn-cta-bg: #0f172a;
+  --btn-cta-text: #ffffff;
+  --btn-sec-bg: #ffffff;
+  --btn-sec-text: #334155;
+  --btn-sec-border: #cbd5e1;
+  --active-menu-bg: #f1f5f9;
+  --active-menu-border: #e2e8f0;
+  --active-menu-text: #0f172a;
+  --input-bg: #ffffff;
+  --input-border: #cbd5e1;
+  --header-bg: rgba(248, 250, 252, 0.8);
+  --table-bg: #ffffff;
+  --table-border: #e2e8f0;
+  --table-row-hover: #f1f5f9;
+}
+
 body {
   font-family:
     "Hanken Grotesk",
@@ -8,9 +56,10 @@ body {
     "Segoe UI",
     Roboto,
     sans-serif;
-  background-color: #0d0e15;
-  color: #e3e1ec;
+  background-color: var(--bg-main);
+  color: var(--text-main);
   -webkit-font-smoothing: antialiased;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 /* Custom scrollbars */
@@ -20,11 +69,11 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: #12131a;
+  background: var(--bg-main);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #27272a;
+  background: var(--border-main);
   border-radius: 10px;
 }
 
@@ -33,9 +82,9 @@ body {
   position: fixed;
   inset: 0;
   background-image:
-    linear-gradient(to right, rgba(255, 255, 255, 0.015) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
-  background-size: 40px 40px;
+    linear-gradient(to right, rgba(255, 255, 255, 0.005) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.005) 1px, transparent 1px);
+  background-size: 50px 50px;
   pointer-events: none;
   z-index: -10;
 }
@@ -47,31 +96,38 @@ body {
   border-radius: 50%;
   pointer-events: none;
   z-index: -9;
-  filter: blur(140px);
-  opacity: 0.1;
+  filter: blur(160px);
+  opacity: 0.04;
 }
 
 .glow-1 {
-  background: radial-gradient(circle, #7c3aed 0%, transparent 70%);
+  background: radial-gradient(circle, #ffffff 0%, transparent 70%);
   top: -10%;
   right: -10%;
 }
 
 .glow-2 {
-  background: radial-gradient(circle, #3b82f6 0%, transparent 70%);
+  background: radial-gradient(circle, #71717a 0%, transparent 70%);
   bottom: -10%;
   left: -10%;
 }
 
 /* Glasscard & Blur */
 .glass-effect {
-  background: rgba(24, 24, 27, 0.85);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(63, 63, 70, 0.4);
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--glass-border);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+}
+
+.glass-effect:hover {
+  border-color: var(--text-muted);
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
 }
 
 .soft-glow-primary {
-  box-shadow: 0 0 20px rgba(124, 58, 237, 0.15);
+  box-shadow: 0 0 20px var(--glass-border);
 }
 
 /* Settings Panels Animation */

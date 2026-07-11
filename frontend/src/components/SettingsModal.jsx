@@ -134,8 +134,8 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
     }
   };
 
-  const activeTabClass = 'flex-1 pb-2 text-xs font-bold text-purple-400 border-b-2 border-purple-500 bg-transparent border-none cursor-pointer text-center outline-none transition-all duration-200';
-  const inactiveTabClass = 'flex-1 pb-2 text-xs font-bold text-zinc-400 hover:text-zinc-200 bg-transparent border-none cursor-pointer text-center outline-none transition-all duration-200';
+  const activeTabClass = 'flex-1 pb-2 text-xs font-bold text-[var(--text-main)] border-b-2 border-[var(--text-main)] bg-transparent border-none cursor-pointer text-center outline-none transition-all duration-200';
+  const inactiveTabClass = 'flex-1 pb-2 text-xs font-bold text-[var(--text-muted)] hover:text-[var(--text-main)] bg-transparent border-none cursor-pointer text-center outline-none transition-all duration-200';
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center">
@@ -146,13 +146,13 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
       ></div>
 
       {/* Content */}
-      <div className="relative z-10 w-full max-w-[500px] bg-slate-900 border border-zinc-800 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+      <div className="relative z-10 w-full max-w-[500px] bg-[var(--bg-sidebar)] border border-[var(--border-main)] rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
         {/* Header */}
-        <div className="flex justify-between items-center p-4 border-b border-zinc-800 bg-white/2">
-          <h2 className="text-sm font-bold text-white uppercase tracking-wider">Cấu hình hệ thống</h2>
+        <div className="flex justify-between items-center p-4 border-b border-[var(--border-main)] bg-white/2">
+          <h2 className="text-sm font-bold text-[var(--text-main)] uppercase tracking-wider">Cấu hình hệ thống</h2>
           <button 
             onClick={onClose}
-            className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors cursor-pointer"
+            className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-[var(--active-menu-bg)] text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors cursor-pointer border-none bg-transparent"
           >
             <X size={18} />
           </button>
@@ -161,7 +161,7 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
         {/* Body */}
         <div className="p-5 flex flex-col">
           {/* Tabs */}
-          <div className="flex border-b border-zinc-800 mb-4">
+          <div className="flex border-b border-[var(--border-main)] mb-4">
             <button 
               onClick={() => setActiveTab('cookie')}
               className={activeTab === 'cookie' ? activeTabClass : inactiveTabClass}
@@ -186,29 +186,29 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
           {activeTab === 'cookie' && (
             <div className="space-y-4 animate-in fade-in duration-200">
               <div className="flex flex-col gap-2">
-                <label className="text-xs font-semibold text-zinc-400" htmlFor="inputCookie">Cookie Facebook</label>
+                <label className="text-xs font-semibold text-[var(--text-muted)]" htmlFor="inputCookie">Cookie Facebook</label>
                 <textarea 
                   id="inputCookie" 
                   rows="3"
-                  className="w-full bg-black/40 border border-zinc-800 rounded-lg px-4 py-2 text-sm text-zinc-200 focus:outline-none focus:border-purple-500 transition-all placeholder:text-zinc-600 outline-none"
+                  className="w-full bg-[var(--input-bg)] border border-[var(--input-border)] rounded-lg px-4 py-2 text-sm text-[var(--text-main)] focus:outline-none focus:border-[var(--text-muted)] transition-all placeholder:text-[var(--text-muted)] outline-none"
                   placeholder="Dán cookie từ trình duyệt Facebook vào đây..."
                   value={cookieVal}
                   onChange={(e) => setCookieVal(e.target.value)}
                 ></textarea>
-                <p className="text-[11px] text-zinc-500 leading-normal">
+                <p className="text-[11px] text-[var(--text-muted)] leading-normal">
                   Chỉ cần nhập cookie — các token sẽ được tự động trích xuất khi tiến hành các tác vụ tiếp theo.
                 </p>
               </div>
               <div className="flex gap-3 pt-2">
                 <button
                   onClick={handleSaveCookie}
-                  className="bg-white hover:bg-white/95 text-black py-2 px-5 rounded-lg text-xs font-semibold transition-all active:scale-98 cursor-pointer border-none"
+                  className="bg-[var(--btn-cta-bg)] hover:bg-[var(--btn-cta-bg)]/90 text-[var(--btn-cta-text)] py-2 px-5 rounded-lg text-xs font-semibold transition-all active:scale-98 cursor-pointer border-none"
                 >
                   Lưu cấu hình
                 </button>
                 <button
                   onClick={handleClearCookie}
-                  className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 py-2 px-5 rounded-lg text-xs font-semibold transition-all active:scale-98 cursor-pointer border-none"
+                  className="bg-[var(--btn-sec-bg)] hover:bg-[var(--btn-sec-bg)]/90 text-[var(--btn-sec-text)] border border-[var(--btn-sec-border)] py-2 px-5 rounded-lg text-xs font-semibold transition-all active:scale-98 cursor-pointer"
                 >
                   Xoá cookie
                 </button>
@@ -220,11 +220,11 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
           {activeTab === 'login' && (
             <form onSubmit={handleFbLogin} className="space-y-4 animate-in fade-in duration-200">
               <div className="flex flex-col gap-2">
-                <label className="text-xs font-semibold text-zinc-400" htmlFor="inputFbUsername">Tài khoản Facebook (Email/SĐT/UID)</label>
+                <label className="text-xs font-semibold text-[var(--text-muted)]" htmlFor="inputFbUsername">Tài khoản Facebook (Email/SĐT/UID)</label>
                 <input 
                   type="text" 
                   id="inputFbUsername"
-                  className="w-full bg-black/40 border border-zinc-800 rounded-lg px-4 py-2 text-sm text-zinc-200 focus:outline-none focus:border-purple-500 transition-all outline-none"
+                  className="w-full bg-[var(--input-bg)] border border-[var(--input-border)] rounded-lg px-4 py-2 text-sm text-[var(--text-main)] focus:outline-none focus:border-[var(--text-muted)] transition-all outline-none"
                   placeholder="Nhập tài khoản Facebook..."
                   value={fbUsername}
                   onChange={(e) => setFbUsername(e.target.value)}
@@ -233,11 +233,11 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
                 />
               </div>
               <div className="flex flex-col gap-2">
-                <label className="text-xs font-semibold text-zinc-400" htmlFor="inputFbPassword">Mật khẩu Facebook</label>
+                <label className="text-xs font-semibold text-[var(--text-muted)]" htmlFor="inputFbPassword">Mật khẩu Facebook</label>
                 <input 
                   type="password" 
                   id="inputFbPassword"
-                  className="w-full bg-black/40 border border-zinc-800 rounded-lg px-4 py-2 text-sm text-zinc-200 focus:outline-none focus:border-purple-500 transition-all outline-none"
+                  className="w-full bg-[var(--input-bg)] border border-[var(--input-border)] rounded-lg px-4 py-2 text-sm text-[var(--text-main)] focus:outline-none focus:border-[var(--text-muted)] transition-all outline-none"
                   placeholder="Nhập mật khẩu..."
                   value={fbPassword}
                   onChange={(e) => setFbPassword(e.target.value)}
@@ -246,11 +246,11 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
                 />
               </div>
               <div className="flex flex-col gap-2">
-                <label className="text-xs font-semibold text-zinc-400" htmlFor="inputFb2FA">Mã khóa 2FA (Secret Key)</label>
+                <label className="text-xs font-semibold text-[var(--text-muted)]" htmlFor="inputFb2FA">Mã khóa 2FA (Secret Key)</label>
                 <input 
                   type="text" 
                   id="inputFb2FA"
-                  className="w-full bg-black/40 border border-zinc-800 rounded-lg px-4 py-2 text-sm text-zinc-200 focus:outline-none focus:border-purple-500 transition-all outline-none"
+                  className="w-full bg-[var(--input-bg)] border border-[var(--input-border)] rounded-lg px-4 py-2 text-sm text-[var(--text-main)] focus:outline-none focus:border-[var(--text-muted)] transition-all outline-none"
                   placeholder="Nhập mã bảo mật 2FA 16 hoặc 32 ký tự..."
                   value={fb2fa}
                   onChange={(e) => setFb2fa(e.target.value)}
@@ -261,7 +261,7 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
                 <button
                   type="submit"
                   disabled={fbLoginLoading}
-                  className="bg-white hover:bg-white/95 text-black py-2 px-5 rounded-lg text-xs font-semibold transition-all active:scale-98 cursor-pointer border-none flex items-center justify-center gap-2 disabled:opacity-50"
+                  className="bg-[var(--btn-cta-bg)] hover:bg-[var(--btn-cta-bg)]/90 text-[var(--btn-cta-text)] py-2 px-5 rounded-lg text-xs font-semibold transition-all active:scale-98 cursor-pointer border-none flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   {fbLoginLoading ? (
                     <>
@@ -280,11 +280,11 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
           {activeTab === 'password' && (
             <form onSubmit={handleChangePassword} className="space-y-4 animate-in fade-in duration-200">
               <div className="flex flex-col gap-2">
-                <label className="text-xs font-semibold text-zinc-400" htmlFor="currentPassword">Mật khẩu hiện tại</label>
+                <label className="text-xs font-semibold text-[var(--text-muted)]" htmlFor="currentPassword">Mật khẩu hiện tại</label>
                 <input
                   id="currentPassword" 
                   type="password"
-                  className="w-full bg-black/40 border border-zinc-800 rounded-lg px-4 py-2 text-sm text-zinc-200 focus:outline-none focus:border-purple-500 transition-all outline-none"
+                  className="w-full bg-[var(--input-bg)] border border-[var(--input-border)] rounded-lg px-4 py-2 text-sm text-[var(--text-main)] focus:outline-none focus:border-[var(--text-muted)] transition-all outline-none"
                   value={currentPassword}
                   onChange={(e) => setCurrentPassword(e.target.value)}
                   disabled={passLoading}
@@ -292,11 +292,11 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
                 />
               </div>
               <div className="flex flex-col gap-2">
-                <label className="text-xs font-semibold text-zinc-400" htmlFor="newPassword">Mật khẩu mới</label>
+                <label className="text-xs font-semibold text-[var(--text-muted)]" htmlFor="newPassword">Mật khẩu mới</label>
                 <input
                   id="newPassword" 
                   type="password"
-                  className="w-full bg-black/40 border border-zinc-800 rounded-lg px-4 py-2 text-sm text-zinc-200 focus:outline-none focus:border-purple-500 transition-all outline-none"
+                  className="w-full bg-[var(--input-bg)] border border-[var(--input-border)] rounded-lg px-4 py-2 text-sm text-[var(--text-main)] focus:outline-none focus:border-[var(--text-muted)] transition-all outline-none"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   disabled={passLoading}
@@ -304,11 +304,11 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
                 />
               </div>
               <div className="flex flex-col gap-2">
-                <label className="text-xs font-semibold text-zinc-400" htmlFor="confirmPassword">Nhập lại mật khẩu mới</label>
+                <label className="text-xs font-semibold text-[var(--text-muted)]" htmlFor="confirmPassword">Nhập lại mật khẩu mới</label>
                 <input
                   id="confirmPassword" 
                   type="password"
-                  className="w-full bg-black/40 border border-zinc-800 rounded-lg px-4 py-2 text-sm text-zinc-200 focus:outline-none focus:border-purple-500 transition-all outline-none"
+                  className="w-full bg-[var(--input-bg)] border border-[var(--input-border)] rounded-lg px-4 py-2 text-sm text-[var(--text-main)] focus:outline-none focus:border-[var(--text-muted)] transition-all outline-none"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   disabled={passLoading}
@@ -319,7 +319,7 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
                 <button
                   type="submit"
                   disabled={passLoading}
-                  className="bg-white hover:bg-white/95 text-black py-2 px-5 rounded-lg text-xs font-semibold transition-all active:scale-98 cursor-pointer border-none flex items-center justify-center gap-2 disabled:opacity-50"
+                  className="bg-[var(--btn-cta-bg)] hover:bg-[var(--btn-cta-bg)]/90 text-[var(--btn-cta-text)] py-2 px-5 rounded-lg text-xs font-semibold transition-all active:scale-98 cursor-pointer border-none flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   {passLoading ? (
                     <>

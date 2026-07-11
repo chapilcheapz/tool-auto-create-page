@@ -21,20 +21,20 @@ export default function RightSidebar({
       )}
 
       <aside 
-        className={`fixed right-0 top-0 h-full w-[300px] sm:w-[360px] bg-slate-900/90 border-l border-zinc-800 flex flex-col z-50 transition-transform duration-300 ${
+        className={`fixed right-0 top-0 h-full w-[300px] sm:w-[360px] bg-[#070707]/95 backdrop-blur-md border-l border-zinc-900 flex flex-col z-50 transition-transform duration-300 ${
           isOpen ? 'translate-x-0' : 'translate-x-full lg:translate-x-0'
         }`}
       >
         {/* Sidebar Header */}
-        <div className="p-4 flex items-center justify-between border-b border-zinc-800">
+        <div className="p-4 flex items-center justify-between border-b border-zinc-900">
           <div className="flex items-center gap-2">
-            <ListFilter className="text-sky-500" size={18} />
+            <ListFilter className="text-zinc-400" size={18} />
             <h2 className="text-xs font-semibold text-white uppercase tracking-widest">Danh Sách Page</h2>
           </div>
           <button 
             onClick={onRefresh}
             disabled={loading}
-            className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors cursor-pointer disabled:opacity-50"
+            className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/5 text-zinc-400 hover:text-white transition-colors cursor-pointer disabled:opacity-50 border-none bg-transparent"
             title="Tải lại danh sách"
           >
             <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
@@ -103,7 +103,7 @@ export default function RightSidebar({
         </div>
 
         {/* Sidebar Footer */}
-        <div className="p-4 bg-zinc-950 border-t border-zinc-800">
+        <div className="p-4 bg-[#070707] border-t border-zinc-900">
           <div className="flex items-center gap-2">
             <div className={`w-2 h-2 rounded-full animate-pulse ${hasCookie ? 'bg-emerald-500' : 'bg-red-500'}`}></div>
             <span className="text-xs text-zinc-400">

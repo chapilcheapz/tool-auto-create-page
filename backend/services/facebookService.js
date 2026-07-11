@@ -3,6 +3,7 @@ const querystring = require('querystring');
 const { chromium } = require('playwright');
 const { extractTokens } = require('../utils/extract-tokens');
 const { generatePageName, generateBio, buildCommonParams, buildHeaders } = require('../utils/random');
+const { getDocId, autoDiscoverDocId } = require('../utils/doc-manager');
 
 // Helper to parse pages recursively from FB GraphQL response
 function parsePagesFromGraphQL(responseData) {
@@ -68,24 +69,53 @@ async function getPages(cookie) {
   const headers = buildHeaders(config);
   headers['x-fb-friendly-name'] = 'PagesCometLaunchpointUnifiedQueryPagesListRedesignedQuery';
 
-  const params = {
-    av: config.__user,
-    ...buildCommonParams(config),
-    __crn: 'comet.fbweb.CometHomeRoute',
-    fb_api_caller_class: 'RelayModern',
-    fb_api_req_friendly_name: 'PagesCometLaunchpointUnifiedQueryPagesListRedesignedQuery',
-    server_timestamps: 'true',
-    variables: JSON.stringify({ scale: 2 }),
-    doc_id: '27150973057845854'
+  const executeRequest = async (docIdValue) => {
+    const params = {
+      av: config.__user,
+      ...buildCommonParams(config),
+      __crn: 'comet.fbweb.CometHomeRoute',
+      fb_api_caller_class: 'RelayModern',
+      fb_api_req_friendly_name: 'PagesCometLaunchpointUnifiedQueryPagesListRedesignedQuery',
+      server_timestamps: 'true',
+      variables: JSON.stringify({ scale: 2 }),
+      doc_id: docIdValue
+    };
+
+    return axios.post(
+      'https://www.facebook.com/api/graphql/',
+      querystring.stringify(params),
+      { headers }
+    );
   };
 
-  const response = await axios.post(
-    'https://www.facebook.com/api/graphql/',
-    querystring.stringify(params),
-    { headers }
-  );
+  let docId = getDocId('PagesCometLaunchpointUnifiedQueryPagesListRedesignedQuery');
+  let response;
+  try {
+    response = await executeRequest(docId);
+  } catch (error) {
+    throw new Error(`Lỗi kết nối Facebook: ${error.message}`);
+  }
 
-  return parsePagesFromGraphQL(response.data);
+  let respData = response.data;
+  let isDocIdError = typeof respData === 'string' 
+    ? respData.includes('was not found') 
+    : JSON.stringify(respData).includes('was not found');
+
+  if (isDocIdError) {
+    console.log(`[Self-Healing] Phát hiện doc_id lấy danh sách page cũ (${docId}) đã hết hạn. Đang tự động dò tìm doc_id mới...`);
+    const newDocId = await autoDiscoverDocId(cookie, 'PagesCometLaunchpointUnifiedQueryPagesListRedesignedQuery');
+    if (newDocId) {
+      console.log(`[Self-Healing] Đã lấy được doc_id mới (${newDocId}). Tiến hành gửi lại yêu cầu lấy danh sách...`);
+      try {
+        response = await executeRequest(newDocId);
+        respData = response.data;
+      } catch (error) {
+        throw new Error(`Lỗi kết nối Facebook khi gọi lại: ${error.message}`);
+      }
+    }
+  }
+
+  return parsePagesFromGraphQL(respData);
 }
 
 /**
@@ -114,43 +144,97 @@ async function createPage(cookie, customName, customBio, category) {
   };
 
   const headers = buildHeaders(config);
-  headers['x-fb-friendly-name'] = 'ProfileCometCreationMutation';
+  headers['x-fb-friendly-name'] = 'AdditionalProfilePlusCreationMutation';
 
   const variables = {
     input: {
       bio: pageBio,
       categories: [pageCategory],
+      creation_source: 'comet',
       name: pageName,
-      page_creation_source: 'COMET_LAUNCHPOINT',
+      off_platform_creator_reachout_id: null,
+      page_referrer: 'null',
+      actor_id: config.__user,
       client_mutation_id: '1'
     }
   };
 
-  const params = {
-    av: config.__user,
-    ...buildCommonParams(config),
-    __crn: 'comet.fbweb.CometHomeRoute',
-    fb_api_caller_class: 'RelayModern',
-    fb_api_req_friendly_name: 'ProfileCometCreationMutation',
-    server_timestamps: 'true',
-    variables: JSON.stringify(variables),
-    doc_id: '8682136001859062'
+  const executeRequest = async (docIdValue) => {
+    const params = {
+      av: config.__user,
+      ...buildCommonParams(config),
+      __crn: 'comet.fbweb.CometAdditionalProfilePlusCreationRoute',
+      fb_api_caller_class: 'RelayModern',
+      fb_api_req_friendly_name: 'AdditionalProfilePlusCreationMutation',
+      server_timestamps: 'true',
+      variables: JSON.stringify(variables),
+      doc_id: docIdValue
+    };
+
+    return axios.post(
+      'https://www.facebook.com/api/graphql/',
+      querystring.stringify(params),
+      { headers }
+    );
   };
 
-  const response = await axios.post(
-    'https://www.facebook.com/api/graphql/',
-    querystring.stringify(params),
-    { headers }
-  );
+  let docId = getDocId('AdditionalProfilePlusCreationMutation');
+  let response;
+  try {
+    response = await executeRequest(docId);
+  } catch (error) {
+    throw new Error(`Lỗi kết nối Facebook: ${error.message}`);
+  }
 
-  const respData = response.data;
-  const isSuccess = JSON.stringify(respData).includes('page_create');
+  let respData = response.data;
+  let isDocIdError = typeof respData === 'string' 
+    ? respData.includes('was not found') 
+    : JSON.stringify(respData).includes('was not found');
+
+  if (isDocIdError) {
+    console.log(`[Self-Healing] Phát hiện doc_id tạo page cũ (${docId}) đã hết hạn. Đang tự động dò tìm doc_id mới...`);
+    const newDocId = await autoDiscoverDocId(cookie, 'AdditionalProfilePlusCreationMutation');
+    if (newDocId) {
+      console.log(`[Self-Healing] Đã lấy được doc_id mới (${newDocId}). Tiến hành gửi lại yêu cầu tạo page...`);
+      try {
+        response = await executeRequest(newDocId);
+        respData = response.data;
+      } catch (error) {
+        throw new Error(`Lỗi kết nối Facebook khi gọi lại: ${error.message}`);
+      }
+    } else {
+      throw new Error(`Facebook đã thay đổi API tạo trang. Không thể tự động lấy doc_id mới. Chi tiết phản hồi: ${JSON.stringify(respData)}`);
+    }
+  }
+
+  const respStr = JSON.stringify(respData);
+  const isSuccess = respStr.includes('page_create') || 
+                    (respStr.includes('additional_profile_plus_create') && 
+                     !respStr.includes('error_message') &&
+                     !respStr.includes('"page\":null'));
 
   if (isSuccess) {
     return { success: true, name: pageName, bio: pageBio };
-  } else {
-    throw new Error(JSON.stringify(respData));
   }
+
+  // Bắt lỗi yêu cầu xác minh SMS
+  if (respStr.includes('SMS verification') || respStr.includes('suspicious activity') || respStr.includes('error_message')) {
+    let errorMsg = 'Facebook từ chối tạo trang.';
+    try {
+      const parsed = typeof respData === 'string' ? JSON.parse(respData) : respData;
+      const fbError = parsed?.data?.additional_profile_plus_create?.error_message;
+      if (fbError) {
+        if (fbError.includes('SMS verification') || fbError.includes('suspicious activity')) {
+          errorMsg = 'Facebook phát hiện hoạt động đáng ngờ. Vui lòng mở ứng dụng Facebook trên điện thoại và hoàn tất xác minh số điện thoại (SMS) trước khi tạo trang mới.';
+        } else {
+          errorMsg = `Facebook từ chối: ${fbError}`;
+        }
+      }
+    } catch {}
+    throw new Error(errorMsg);
+  }
+
+  throw new Error(respStr);
 }
 
 /**

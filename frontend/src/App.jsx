@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, Menu, ListFilter, AlertCircle, RefreshCw } from 'lucide-react';
+import { Sparkles, Menu, ListFilter, AlertCircle, RefreshCw, Sun, Moon } from 'lucide-react';
 import * as api from './utils/api';
 import LoginView from './components/LoginView';
 import Sidebar from './components/Sidebar';
-import RightSidebar from './components/RightSidebar';
 import SettingsModal from './components/SettingsModal';
 import ListPageView from './components/ListPageView';
 import CreatePageView from './components/CreatePageView';
@@ -12,6 +11,18 @@ import ReactCampaignView from './components/ReactCampaignView';
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(!!localStorage.getItem('jwt_token'));
   const [currentView, setView] = useState('list'); // 'list' | 'create' | 'react'
+  const [theme, setTheme] = useState(localStorage.getItem('theme') || 'dark');
+  
+  useEffect(() => {
+    if (theme === 'light') {
+      document.documentElement.classList.add('light');
+      document.documentElement.classList.remove('dark');
+    } else {
+      document.documentElement.classList.add('dark');
+      document.documentElement.classList.remove('light');
+    }
+    localStorage.setItem('theme', theme);
+  }, [theme]);
   
   // Settings & Cookie Configuration
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -101,6 +112,7 @@ export default function App() {
 
   const handleLogout = () => {
     localStorage.removeItem('jwt_token');
+    localStorage.removeItem('username');
     setIsAuthenticated(false);
     showToast('Đã đăng xuất hệ thống!', 'success');
   };
@@ -119,7 +131,7 @@ export default function App() {
   }
 
   return (
-    <div className="bg-[#0d0e15] text-[#e3e1ec] min-h-screen flex overflow-hidden">
+    <div className="bg-[var(--bg-main)] text-[var(--text-main)] min-h-screen flex overflow-hidden transition-colors duration-300">
       {/* Background glow effects */}
       <div className="bg-grid"></div>
       <div className="bg-glow glow-1"></div>
@@ -133,38 +145,73 @@ export default function App() {
         onLogout={handleLogout}
         isOpen={isLeftSidebarOpen}
         onClose={() => setIsLeftSidebarOpen(false)}
+        username={localStorage.getItem('username') || 'Admin'}
       />
 
       {/* Main Content Canvas */}
-      <main className="lg:ml-[320px] lg:mr-[360px] ml-0 mr-0 flex-1 flex flex-col h-screen overflow-y-auto">
+      <main className="lg:ml-[320px] ml-0 flex-1 flex flex-col h-screen overflow-y-auto">
         {/* Top Header Bar */}
-        <header className="flex justify-between items-center px-4 sm:px-6 py-4 w-full sticky top-0 bg-[#0d0e15]/80 backdrop-blur-md z-40 border-b border-zinc-800/40">
+        <header className="flex justify-between items-center px-4 sm:px-6 py-4 w-full sticky top-0 bg-[var(--header-bg)] backdrop-blur-md z-40 border-b border-[var(--border-main)] transition-colors duration-300">
           <div className="flex items-center gap-2">
             {/* Mobile Left Menu Toggle */}
             <button 
               onClick={() => setIsLeftSidebarOpen(true)}
-              className="lg:hidden w-10 h-10 flex items-center justify-center rounded-lg hover:bg-zinc-800 text-white transition-colors cursor-pointer bg-transparent border-none"
+              className="lg:hidden w-10 h-10 flex items-center justify-center rounded-lg hover:bg-zinc-800 text-[var(--text-main)] transition-colors cursor-pointer bg-transparent border-none"
             >
               <Menu size={20} />
             </button>
-            <span className="text-sm font-bold text-white truncate uppercase tracking-wider">Trình quản lý</span>
+            <span className="text-sm font-bold text-[var(--text-main)] truncate uppercase tracking-wider">Trình quản lý</span>
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Ready Status Badge */}
-            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-zinc-900 rounded-full border border-zinc-800">
-              <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
-              <span className="text-xs font-semibold text-zinc-300">Sẵn sàng</span>
-            </div>
-
-            {/* Mobile Right Menu Toggle */}
-            <button 
-              onClick={() => setIsRightSidebarOpen(true)}
-              className="lg:hidden w-10 h-10 flex items-center justify-center rounded-lg hover:bg-zinc-800 text-white transition-colors cursor-pointer bg-transparent border-none"
-              title="Danh sách Page"
+            {/* Light / Dark Mode Toggle */}
+            <button
+              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+              className="w-10 h-10 flex items-center justify-center rounded-xl bg-[var(--active-menu-bg)] border border-[var(--active-menu-border)] text-[var(--text-main)] hover:bg-[var(--text-main)]/5 transition-all cursor-pointer outline-none shrink-0"
+              title={theme === 'dark' ? 'Bật chế độ sáng' : 'Bật chế độ tối'}
             >
-              <ListFilter size={20} />
+              {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
             </button>
+
+            {/* User Profile Avatar */}
+            {(() => {
+              const getFbUid = (cookieString) => {
+                if (!cookieString) return null;
+                const match = cookieString.match(/c_user=(\d+)/);
+                return match ? match[1] : null;
+              };
+              const fbUid = getFbUid(cookie);
+              const sysUser = localStorage.getItem('username') || 'Admin';
+              
+              return (
+                <div 
+                  className="w-10 h-10 rounded-xl bg-[var(--active-menu-bg)] border border-[var(--active-menu-border)] flex items-center justify-center overflow-hidden shrink-0 transition-transform duration-200 hover:scale-105 shadow-sm"
+                  title={fbUid ? `UID Facebook: ${fbUid}` : `Tài khoản: ${sysUser}`}
+                >
+                  {fbUid ? (
+                    <img 
+                      src={`https://graph.facebook.com/${fbUid}/picture?type=square&width=100&height=100`} 
+                      alt="FB Profile" 
+                      className="w-full h-full object-cover rounded-xl"
+                      onError={(e) => {
+                        e.target.onerror = null;
+                        e.target.src = `https://api.dicebear.com/7.x/initials/svg?seed=${sysUser}`;
+                      }}
+                    />
+                  ) : (
+                    <span className="text-sm font-bold text-[var(--text-main)] uppercase">
+                      {sysUser.charAt(0)}
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Ready Status Badge */}
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-[var(--active-menu-bg)] rounded-full border border-[var(--active-menu-border)]">
+              <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+              <span className="text-xs font-semibold text-[var(--text-main)]">Sẵn sàng</span>
+            </div>
           </div>
         </header>
 
@@ -197,17 +244,6 @@ export default function App() {
           )}
         </div>
       </main>
-
-      {/* Right Sidebar list of Facebook pages */}
-      <RightSidebar 
-        pages={pages}
-        loading={pagesLoading}
-        onRefresh={() => fetchPagesList(cookie)}
-        hasCookie={!!cookie}
-        errorMsg={pagesError}
-        isOpen={isRightSidebarOpen}
-        onClose={() => setIsRightSidebarOpen(false)}
-      />
 
       {/* Settings Modal */}
       <SettingsModal 

@@ -18,6 +18,11 @@ export default function LoginView({ onLoginSuccess, showToast }) {
       const result = await api.login(username, password);
       if (result.success && result.token) {
         localStorage.setItem('jwt_token', result.token);
+        if (result.user && result.user.username) {
+          localStorage.setItem('username', result.user.username);
+        } else {
+          localStorage.setItem('username', username);
+        }
         showToast('Đăng nhập hệ thống thành công!', 'success');
         onLoginSuccess();
       } else {
