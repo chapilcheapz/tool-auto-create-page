@@ -200,7 +200,7 @@ async function fbLogin(req, res) {
   try {
     console.log('[FB-Login] Đang khởi động trình duyệt giả lập với Persistent Context...');
     context = await chromium.launchPersistentContext(profilePath, {
-      headless: false,
+      headless: true,
       ignoreDefaultArgs: ['--enable-automation'],
       args: [
         '--disable-gpu',
