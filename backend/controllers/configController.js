@@ -218,6 +218,22 @@ async function fbLogin(req, res) {
     console.log('[FB-Login] Đang điều hướng đến trang facebook.com...');
     await page.goto('https://www.facebook.com/', { waitUntil: 'domcontentloaded', timeout: 30000 });
 
+    // 1. Kiểm tra xem phiên cũ đã đăng nhập sẵn chưa (cơ chế Persistent Context có thể giữ session)
+    const initialCookies = await context.cookies('https://www.facebook.com');
+    const hasCUser = initialCookies.find(c => c.name === 'c_user');
+    const hasXs = initialCookies.find(c => c.name === 'xs');
+
+    if (hasCUser && hasXs) {
+      console.log(`[FB-Login] Trình duyệt đã đăng nhập sẵn! c_user = ${hasCUser.value}`);
+      const cookieString = initialCookies.map(c => `${c.name}=${c.value}`).join('; ');
+      
+      await writeConfig(cookieString);
+      clearUserCache();
+      
+      console.log('[FB-Login] Đã tự động nhận diện và lưu cấu hình cookie từ phiên cũ.');
+      return res.json({ success: true, cookie: cookieString });
+    }
+
     console.log('[FB-Login] Đang kiểm tra hộp thoại Cookie Consent...');
     try {
       const cookieAcceptBtn = page.locator('button[data-cookiebanner="accept_button"], button[data-testid="cookie-policy-manage-dialog-accept-button"]');
@@ -233,23 +249,46 @@ async function fbLogin(req, res) {
     }
 
     console.log('[FB-Login] Đang điền thông tin đăng nhập (email và password)...');
-    await page.locator('input[name="email"]').fill(email);
-    await page.locator('input[name="pass"]').fill(password);
+    
+    // Đợi ô nhập email xuất hiện (giới hạn 10s đề phòng trường hợp tải chậm hoặc tự động đăng nhập sau chuyển hướng)
+    const emailInput = page.locator('input[name="email"]');
+    let loginResult;
+    try {
+      await emailInput.waitFor({ state: 'visible', timeout: 10000 });
+      await emailInput.fill(email);
+      await page.locator('input[name="pass"]').fill(password);
 
-    console.log('[FB-Login] Đang tìm kiếm nút Đăng nhập...');
-    const loginButton = page.getByRole('button', {
-      name: 'Đăng nhập',
-      exact: true,
-    });
+      console.log('[FB-Login] Đang tìm kiếm nút Đăng nhập...');
+      const loginButton = page.getByRole('button', {
+        name: 'Đăng nhập',
+        exact: true,
+      });
 
-    if (await loginButton.isVisible().catch(() => false)) {
-      await loginButton.click();
-    } else {
-      await page.locator('input[name="pass"]').press('Enter');
+      if (await loginButton.isVisible().catch(() => false)) {
+        await loginButton.click();
+      } else {
+        await page.locator('input[name="pass"]').press('Enter');
+      }
+
+      console.log('[FB-Login] Bắt đầu luồng kiểm tra và chờ xác thực...');
+      loginResult = await waitForFacebookAuthentication(page, context);
+    } catch (e) {
+      // Nếu không tìm thấy ô nhập email, kiểm tra lại cookie lần cuối để xem đã tự đăng nhập thành công hay chưa
+      const checkCookies = await context.cookies('https://www.facebook.com');
+      const finalCUser = checkCookies.find(c => c.name === 'c_user');
+      const finalXs = checkCookies.find(c => c.name === 'xs');
+      
+      if (finalCUser && finalXs) {
+        console.log(`[FB-Login] Phát hiện đã đăng nhập tự động thành công! c_user = ${finalCUser.value}`);
+        loginResult = {
+          success: true,
+          cookies: checkCookies
+        };
+      } else {
+        // Nếu thực sự chưa đăng nhập và không thấy ô nhập email, quăng lỗi
+        throw new Error('Không tìm thấy giao diện đăng nhập Facebook (có thể trang bị chuyển hướng hoặc chặn block).');
+      }
     }
-
-    console.log('[FB-Login] Bắt đầu luồng kiểm tra và chờ xác thực...');
-    const loginResult = await waitForFacebookAuthentication(page, context);
 
     const safeUrl = new URL(page.url());
     console.log('[FB-Login] Trang hiện tại:', safeUrl.pathname);

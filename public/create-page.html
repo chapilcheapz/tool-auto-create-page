@@ -295,6 +295,26 @@
       background: rgba(255, 255, 255, 0.03);
     }
 
+    .settings-panel {
+      display: none;
+    }
+
+    .settings-panel.active {
+      display: block !important;
+      animation: settingsPanelFadeIn 0.25s ease forwards;
+    }
+
+    @keyframes settingsPanelFadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(4px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
     /* Keep the cosmic background styles */
     .login-page {
       position: fixed !important;
@@ -691,89 +711,77 @@
           </svg>
         </button>
       </div>
-      <div class="modal-body p-md space-y-md">
-        <!-- Section: Cookie Facebook -->
-        <div class="settings-section">
-          <h3 class="text-label-md font-label-md text-on-surface-variant mb-xs uppercase tracking-wider">Cấu hình Cookie
-            Facebook</h3>
+      <div class="modal-body p-md">
+        <!-- Mode Tabs (3 Flat Tabs) -->
+        <div class="flex border-b border-outline-variant/30 mb-sm">
+          <button id="tabModeCookie"
+            class="flex-1 pb-2 text-label-md font-bold text-primary border-b-2 border-primary bg-transparent border-none cursor-pointer text-center outline-none">
+            Dán Cookie thủ công
+          </button>
+          <button id="tabModeLogin"
+            class="flex-1 pb-2 text-label-md font-bold text-on-surface-variant hover:text-on-surface bg-transparent border-none cursor-pointer text-center outline-none">
+            Đăng nhập tài khoản
+          </button>
+          <button id="tabModePassword"
+            class="flex-1 pb-2 text-label-md font-bold text-on-surface-variant hover:text-on-surface bg-transparent border-none cursor-pointer text-center outline-none">
+            Đổi mật khẩu hệ thống
+          </button>
+        </div>
 
-          <!-- Mode Tabs -->
-          <div class="flex border-b border-outline-variant/30 mb-sm">
-            <button id="tabModeCookie"
-              class="flex-1 pb-2 text-label-md font-bold text-primary border-b-2 border-primary bg-transparent border-none cursor-pointer text-center outline-none">
-              Dán Cookie thủ công
-            </button>
-            <button id="tabModeLogin"
-              class="flex-1 pb-2 text-label-md font-bold text-on-surface-variant hover:text-on-surface bg-transparent border-none cursor-pointer text-center outline-none">
-              Đăng nhập tài khoản
-            </button>
+        <!-- Panel 1: Paste Cookie Manually -->
+        <div id="panelModeCookie" class="space-y-sm settings-panel active">
+          <div class="flex flex-col gap-xs mt-sm">
+            <label class="text-label-sm font-label-sm text-on-surface-variant" for="inputCookie">Cookie Facebook</label>
+            <textarea id="inputCookie" rows="3"
+              class="w-full bg-[#121214] border border-outline-variant rounded-lg px-md py-sm text-body-md text-on-surface focus:outline-none focus:border-primary transition-all placeholder:text-outline"
+              placeholder="Dán cookie từ trình duyệt Facebook vào đây..."></textarea>
+            <p class="text-label-sm font-label-sm text-outline">Chỉ cần nhập cookie — các token sẽ được tự động trích xuất khi tiến hành tạo page.</p>
           </div>
-
-          <!-- Panel 1: Paste Cookie Manually -->
-          <div id="panelModeCookie" class="space-y-sm">
-            <div class="flex flex-col gap-xs">
-              <label class="text-label-sm font-label-sm text-on-surface-variant" for="inputCookie">Cookie
-                Facebook</label>
-              <textarea id="inputCookie" rows="3"
-                class="w-full bg-[#121214] border border-outline-variant rounded-lg px-md py-sm text-body-md text-on-surface focus:outline-none focus:border-primary transition-all placeholder:text-outline"
-                placeholder="Dán cookie từ trình duyệt Facebook vào đây..."></textarea>
-              <p class="text-label-sm font-label-sm text-outline">Chỉ cần nhập cookie — các token sẽ được tự động trích
-                xuất khi tiến hành tạo page.</p>
-            </div>
-            <div class="flex gap-sm mt-md">
-              <button
-                class="bg-white text-black py-xs px-md rounded-lg font-label-sm transition-all hover:opacity-90 active:scale-95 cursor-pointer border-none"
-                id="btnSaveConfig">Lưu cấu hình</button>
-              <button
-                class="bg-[#292931] text-on-surface py-xs px-md rounded-lg font-label-sm transition-all hover:bg-surface-variant cursor-pointer border-none"
-                id="btnClearConfig">Xoá cookie</button>
-            </div>
-          </div>
-
-          <!-- Panel 2: Auto Login Facebook -->
-          <div id="panelModeLogin" class="space-y-sm hidden">
-            <div class="flex flex-col gap-xs">
-              <label class="text-label-sm font-label-sm text-on-surface-variant" for="inputFbUsername">Tài khoản
-                Facebook (Email/SĐT/UID)</label>
-              <input type="text" id="inputFbUsername"
-                class="w-full bg-[#121214] border border-outline-variant rounded-lg px-md py-sm text-body-md text-on-surface focus:outline-none focus:border-primary transition-all"
-                placeholder="Nhập tài khoản Facebook..." />
-            </div>
-            <div class="flex flex-col gap-xs">
-              <label class="text-label-sm font-label-sm text-on-surface-variant" for="inputFbPassword">Mật khẩu
-                Facebook</label>
-              <input type="password" id="inputFbPassword"
-                class="w-full bg-[#121214] border border-outline-variant rounded-lg px-md py-sm text-body-md text-on-surface focus:outline-none focus:border-primary transition-all"
-                placeholder="Nhập mật khẩu..." />
-            </div>
-            <div class="flex flex-col gap-xs">
-              <label class="text-label-sm font-label-sm text-on-surface-variant" for="inputFb2FA">Mã khóa 2FA (Secret
-                Key)</label>
-              <input type="text" id="inputFb2FA"
-                class="w-full bg-[#121214] border border-outline-variant rounded-lg px-md py-sm text-body-md text-on-surface focus:outline-none focus:border-primary transition-all"
-                placeholder="Nhập mã bảo mật 2FA 16 hoặc 32 ký tự..." />
-            </div>
-            <div class="flex gap-sm mt-md">
-              <button
-                class="bg-white text-black py-xs px-md rounded-lg font-label-sm transition-all hover:opacity-90 active:scale-95 cursor-pointer border-none flex items-center justify-center gap-xs"
-                id="btnSubmitFbLogin">
-                <span class="fb-btn-text">Đăng nhập &amp; Lấy Cookie</span>
-                <span class="animate-spin material-symbols-outlined text-[16px] hidden" id="spinnerFbLogin">sync</span>
-              </button>
-            </div>
+          <div class="flex gap-sm mt-md">
+            <button
+              class="bg-white text-black py-xs px-md rounded-lg font-label-sm transition-all hover:opacity-90 active:scale-95 cursor-pointer border-none"
+              id="btnSaveConfig">Lưu cấu hình</button>
+            <button
+              class="bg-[#292931] text-on-surface py-xs px-md rounded-lg font-label-sm transition-all hover:bg-surface-variant cursor-pointer border-none"
+              id="btnClearConfig">Xoá cookie</button>
           </div>
         </div>
 
-        <hr class="border-t border-outline-variant my-md">
+        <!-- Panel 2: Auto Login Facebook -->
+        <div id="panelModeLogin" class="space-y-sm settings-panel">
+          <div class="flex flex-col gap-xs mt-sm">
+            <label class="text-label-sm font-label-sm text-on-surface-variant" for="inputFbUsername">Tài khoản Facebook (Email/SĐT/UID)</label>
+            <input type="text" id="inputFbUsername"
+              class="w-full bg-[#121214] border border-outline-variant rounded-lg px-md py-sm text-body-md text-on-surface focus:outline-none focus:border-primary transition-all"
+              placeholder="Nhập tài khoản Facebook..." />
+          </div>
+          <div class="flex flex-col gap-xs">
+            <label class="text-label-sm font-label-sm text-on-surface-variant" for="inputFbPassword">Mật khẩu Facebook</label>
+            <input type="password" id="inputFbPassword"
+              class="w-full bg-[#121214] border border-outline-variant rounded-lg px-md py-sm text-body-md text-on-surface focus:outline-none focus:border-primary transition-all"
+              placeholder="Nhập mật khẩu..." />
+          </div>
+          <div class="flex flex-col gap-xs">
+            <label class="text-label-sm font-label-sm text-on-surface-variant" for="inputFb2FA">Mã khóa 2FA (Secret Key)</label>
+            <input type="text" id="inputFb2FA"
+              class="w-full bg-[#121214] border border-outline-variant rounded-lg px-md py-sm text-body-md text-on-surface focus:outline-none focus:border-primary transition-all"
+              placeholder="Nhập mã bảo mật 2FA 16 hoặc 32 ký tự..." />
+          </div>
+          <div class="flex gap-sm mt-md">
+            <button
+              class="bg-white text-black py-xs px-md rounded-lg font-label-sm transition-all hover:opacity-90 active:scale-95 cursor-pointer border-none flex items-center justify-center gap-xs"
+              id="btnSubmitFbLogin">
+              <span class="fb-btn-text">Đăng nhập &amp; Lấy Cookie</span>
+              <span class="animate-spin material-symbols-outlined text-[16px] hidden" id="spinnerFbLogin">sync</span>
+            </button>
+          </div>
+        </div>
 
-        <!-- Section: Change Password -->
-        <div class="settings-section">
-          <h3 class="text-label-md font-label-md text-on-surface-variant mb-xs uppercase tracking-wider">Đổi mật khẩu hệ
-            thống</h3>
-          <form id="changePasswordForm" onsubmit="return false;" class="space-y-sm">
+        <!-- Panel 3: Change Password -->
+        <div id="panelModePassword" class="space-y-sm settings-panel">
+          <form id="changePasswordForm" onsubmit="return false;" class="space-y-sm mt-sm">
             <div class="flex flex-col gap-xs">
-              <label class="text-label-sm font-label-sm text-on-surface-variant" for="currentPassword">Mật khẩu hiện
-                tại</label>
+              <label class="text-label-sm font-label-sm text-on-surface-variant" for="currentPassword">Mật khẩu hiện tại</label>
               <input
                 class="w-full bg-[#121214] border border-outline-variant rounded-lg px-md py-sm text-body-md text-on-surface focus:outline-none focus:border-primary transition-all"
                 id="currentPassword" type="password" required />
@@ -785,8 +793,7 @@
                 id="newPassword" type="password" required />
             </div>
             <div class="flex flex-col gap-xs">
-              <label class="text-label-sm font-label-sm text-on-surface-variant" for="confirmPassword">Nhập lại mật khẩu
-                mới</label>
+              <label class="text-label-sm font-label-sm text-on-surface-variant" for="confirmPassword">Nhập lại mật khẩu mới</label>
               <input
                 class="w-full bg-[#121214] border border-outline-variant rounded-lg px-md py-sm text-body-md text-on-surface focus:outline-none focus:border-primary transition-all"
                 id="confirmPassword" type="password" required />

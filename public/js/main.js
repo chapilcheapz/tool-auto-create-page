@@ -187,22 +187,43 @@ if (btnProfileToggle && profileDropdownMenu) {
 // ========= Tab Switch in Settings Modal =========
 const tabModeCookie = $('#tabModeCookie');
 const tabModeLogin = $('#tabModeLogin');
+const tabModePassword = $('#tabModePassword');
 const panelModeCookie = $('#panelModeCookie');
 const panelModeLogin = $('#panelModeLogin');
+const panelModePassword = $('#panelModePassword');
 
-if (tabModeCookie && tabModeLogin && panelModeCookie && panelModeLogin) {
+if (tabModeCookie && tabModeLogin && tabModePassword && panelModeCookie && panelModeLogin && panelModePassword) {
+  const activeTabClass = 'flex-1 pb-2 text-label-md font-bold text-primary border-b-2 border-primary bg-transparent border-none cursor-pointer text-center outline-none';
+  const inactiveTabClass = 'flex-1 pb-2 text-label-md font-bold text-on-surface-variant hover:text-on-surface bg-transparent border-none cursor-pointer text-center outline-none';
+
   tabModeCookie.addEventListener('click', () => {
-    panelModeCookie.classList.remove('hidden');
-    panelModeLogin.classList.add('hidden');
-    tabModeCookie.className = 'flex-1 pb-2 text-label-md font-bold text-primary border-b-2 border-primary bg-transparent border-none cursor-pointer text-center outline-none';
-    tabModeLogin.className = 'flex-1 pb-2 text-label-md font-bold text-on-surface-variant hover:text-on-surface bg-transparent border-none cursor-pointer text-center outline-none';
+    panelModeCookie.classList.add('active');
+    panelModeLogin.classList.remove('active');
+    panelModePassword.classList.remove('active');
+    
+    tabModeCookie.className = activeTabClass;
+    tabModeLogin.className = inactiveTabClass;
+    tabModePassword.className = inactiveTabClass;
   });
 
   tabModeLogin.addEventListener('click', () => {
-    panelModeCookie.classList.add('hidden');
-    panelModeLogin.classList.remove('hidden');
-    tabModeLogin.className = 'flex-1 pb-2 text-label-md font-bold text-primary border-b-2 border-primary bg-transparent border-none cursor-pointer text-center outline-none';
-    tabModeCookie.className = 'flex-1 pb-2 text-label-md font-bold text-on-surface-variant hover:text-on-surface bg-transparent border-none cursor-pointer text-center outline-none';
+    panelModeCookie.classList.remove('active');
+    panelModeLogin.classList.add('active');
+    panelModePassword.classList.remove('active');
+    
+    tabModeCookie.className = inactiveTabClass;
+    tabModeLogin.className = activeTabClass;
+    tabModePassword.className = inactiveTabClass;
+  });
+
+  tabModePassword.addEventListener('click', () => {
+    panelModeCookie.classList.remove('active');
+    panelModeLogin.classList.remove('active');
+    panelModePassword.classList.add('active');
+    
+    tabModeCookie.className = inactiveTabClass;
+    tabModeLogin.className = inactiveTabClass;
+    tabModePassword.className = activeTabClass;
   });
 }
 
