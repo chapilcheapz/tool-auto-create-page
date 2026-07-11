@@ -5,13 +5,19 @@ const { getSupabase } = require('../utils/supabase');
 async function initializeUsers() {
   try {
     const supabase = getSupabase();
-    if (!supabase) return;
+    
+    // If Supabase is not configured, skip initialization
+    if (!supabase) {
+      console.warn('⚠️ Supabase chưa được cấu hình. Bỏ qua khởi tạo người dùng.');
+      return;
+    }
 
     const { count, error } = await supabase
       .from('app_users')
       .select('*', { count: 'exact', head: true });
 
     if (error) {
+      console.warn('⚠️ Lỗi khi kiểm tra người dùng:', error.message);
       return;
     }
 
@@ -25,9 +31,11 @@ async function initializeUsers() {
           password: defaultPasswordHash,
           role: 'admin'
         });
+      console.log('✅ Đã tạo người dùng admin mặc định.');
     }
   } catch (error) {
     // Silently handle startup initialization errors
+    console.warn('⚠️ Lỗi trong quá trình khởi tạo người dùng:', error.message);
   }
 }
 
@@ -68,9 +76,10 @@ async function findUserByUsername(username) {
 async function updateUserPassword(username, newPassword) {
   try {
     if (!username) throw new Error('Thiếu tên người dùng');
-    const supabase = getSupabase();
-    if (!supabase) throw new Error('Kết nối cơ sở dữ liệu thất bại');
     
+    const supabase = getSupabase();
+    if (!supabase) throw new Error('Supabase chưa được cấu hình');
+
     const salt = bcrypt.genSaltSync(10);
     const passwordHash = bcrypt.hashSync(newPassword, salt);
     
@@ -110,9 +119,10 @@ async function createUser(username, email, password) {
     if (!username || !email || !password) {
       throw new Error('Thiếu tên tài khoản, email hoặc mật khẩu');
     }
-    const supabase = getSupabase();
-    if (!supabase) throw new Error('Kết nối cơ sở dữ liệu thất bại');
     
+    const supabase = getSupabase();
+    if (!supabase) throw new Error('Supabase chưa được cấu hình');
+
     const salt = bcrypt.genSaltSync(10);
     const passwordHash = bcrypt.hashSync(password, salt);
     
@@ -131,7 +141,6 @@ async function createUser(username, email, password) {
   }
 }
 
-
 module.exports = {
   initializeUsers,
   getUsers,
@@ -140,3 +149,4 @@ module.exports = {
   updateUserPassword,
   createUser
 };
+
