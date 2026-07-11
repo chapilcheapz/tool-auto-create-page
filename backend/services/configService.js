@@ -1,36 +1,38 @@
-const supabase = require('../utils/supabase');
+const fs = require('fs');
+const path = require('path');
 
+const configFilePath = path.join(__dirname, '../../config.json');
+
+/**
+ * Đọc cấu hình từ file config.json cục bộ
+ * @returns {Promise<Object>} - { cookie }
+ */
 async function readConfig() {
   try {
-    const { data, error } = await supabase
-      .from('configs')
-      .select('value')
-      .eq('key', 'cookie')
-      .single();
-    
-    if (error) {
-      if (error.code === 'PGRST116') {
-        return { cookie: '' };
-      }
-      throw error;
+    if (!fs.existsSync(configFilePath)) {
+      return { cookie: '' };
     }
-    
-    return { cookie: data ? data.value : '' };
+    const rawData = fs.readFileSync(configFilePath, 'utf8');
+    const config = JSON.parse(rawData);
+    return { cookie: config.cookie || '' };
   } catch (e) {
+    console.error('Lỗi khi đọc file config.json:', e.message);
     return { cookie: '' };
   }
 }
 
+/**
+ * Ghi cấu hình vào file config.json cục bộ
+ * @param {string} cookieValue
+ * @returns {Promise<Object>} - { success: true }
+ */
 async function writeConfig(cookieValue) {
   try {
-    const { error } = await supabase
-      .from('configs')
-      .upsert({ key: 'cookie', value: cookieValue || '', updated_at: new Date().toISOString() });
-    
-    if (error) throw error;
+    const config = { cookie: cookieValue || '' };
+    fs.writeFileSync(configFilePath, JSON.stringify(config, null, 2), 'utf8');
     return { success: true };
   } catch (e) {
-    throw new Error('Không thể lưu cấu hình lên Supabase: ' + e.message);
+    throw new Error('Không thể lưu cấu hình cục bộ: ' + e.message);
   }
 }
 

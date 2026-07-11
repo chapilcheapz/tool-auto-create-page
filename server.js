@@ -11,7 +11,7 @@ const PORT = 3456;
 // Middlewares
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'build')));
 
 // Mount API router
 app.use('/api', require('./backend/routes/api'));
@@ -19,6 +19,11 @@ app.use('/api', require('./backend/routes/api'));
 // Health check
 app.get('/api/status', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
+});
+
+// Catch-all route to serve React app index.html for SPA routing
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'build', 'index.html'));
 });
 
 // Launch server

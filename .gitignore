@@ -3,3 +3,7 @@ config.json
 .DS_Store
 .env
 storage/facebook-browser-profile/
+build/
+*.log
+.vscode/
+.idea/
