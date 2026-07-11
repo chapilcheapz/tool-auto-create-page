@@ -1,9 +1,12 @@
 const bcrypt = require('bcryptjs');
-const supabase = require('../utils/supabase');
+const { getSupabase } = require('../utils/supabase');
 
 // Check and initialize default user in the Supabase database
 async function initializeUsers() {
   try {
+    const supabase = getSupabase();
+    if (!supabase) return;
+
     const { count, error } = await supabase
       .from('app_users')
       .select('*', { count: 'exact', head: true });
@@ -30,6 +33,9 @@ async function initializeUsers() {
 
 async function getUsers() {
   try {
+    const supabase = getSupabase();
+    if (!supabase) return [];
+
     const { data, error } = await supabase
       .from('app_users')
       .select('*');
@@ -43,6 +49,9 @@ async function getUsers() {
 async function findUserByUsername(username) {
   try {
     if (!username) return null;
+    const supabase = getSupabase();
+    if (!supabase) return null;
+
     const { data, error } = await supabase
       .from('app_users')
       .select('*')
@@ -59,6 +68,8 @@ async function findUserByUsername(username) {
 async function updateUserPassword(username, newPassword) {
   try {
     if (!username) throw new Error('Thiếu tên người dùng');
+    const supabase = getSupabase();
+    if (!supabase) throw new Error('Kết nối cơ sở dữ liệu thất bại');
     
     const salt = bcrypt.genSaltSync(10);
     const passwordHash = bcrypt.hashSync(newPassword, salt);
@@ -78,6 +89,9 @@ async function updateUserPassword(username, newPassword) {
 async function findUserByEmail(email) {
   try {
     if (!email) return null;
+    const supabase = getSupabase();
+    if (!supabase) return null;
+
     const { data, error } = await supabase
       .from('app_users')
       .select('*')
@@ -96,6 +110,8 @@ async function createUser(username, email, password) {
     if (!username || !email || !password) {
       throw new Error('Thiếu tên tài khoản, email hoặc mật khẩu');
     }
+    const supabase = getSupabase();
+    if (!supabase) throw new Error('Kết nối cơ sở dữ liệu thất bại');
     
     const salt = bcrypt.genSaltSync(10);
     const passwordHash = bcrypt.hashSync(password, salt);
@@ -114,6 +130,7 @@ async function createUser(username, email, password) {
     throw error;
   }
 }
+
 
 module.exports = {
   initializeUsers,
