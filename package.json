@@ -3,9 +3,14 @@
   "version": "1.0.0",
   "description": "Tool tự động tạo Facebook Page",
   "main": "server.js",
+  "workspaces": [
+    "frontend"
+  ],
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "build:frontend": "npm run build -w frontend",
+    "dev:frontend": "npm run dev -w frontend"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.2",
