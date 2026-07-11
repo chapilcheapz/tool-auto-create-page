@@ -2,6 +2,17 @@ const { readConfig, writeConfig } = require('../services/configService');
 const { clearUserCache } = require('../utils/extract-tokens');
 const { chromium } = require('playwright');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+
+// Trạng thái xác minh đang chờ (global)
+const verificationState = {
+  pending: false,
+  page: null,
+  screenshotPath: null,
+  _lastSs: null,
+};
+
 
 // Base32 decoding helper
 function base32Decode(base32) {
@@ -73,6 +84,9 @@ async function waitForFacebookAuthentication(page, context) {
   const startedAt = Date.now();
 
   let captchaDetected = false;
+  let lastLoggedPath = '';
+  let lastLogTime = 0;
+  let waitingForCode = false;
 
   while (Date.now() - startedAt < timeout) {
     const captchaVisible = await page
@@ -82,105 +96,137 @@ async function waitForFacebookAuthentication(page, context) {
 
     if (captchaVisible && !captchaDetected) {
       captchaDetected = true;
+      console.log('[FB-Login] Phát hiện reCAPTCHA checkbox. Đang tự động click...');
 
-      console.log(
-        '[FB-Login] Facebook yêu cầu CAPTCHA hình ảnh.'
-      );
+      // Tự động click checkbox trong iframe reCAPTCHA
+      let captchaClicked = false;
+      try {
+        const captchaFrame = page.frameLocator('iframe#captcha-recaptcha');
+        const checkbox = captchaFrame.locator('.recaptcha-checkbox-border, #recaptcha-anchor, .recaptcha-checkbox');
+        await checkbox.first().click({ timeout: 5000 });
+        captchaClicked = true;
+        console.log('[FB-Login] Đã click checkbox reCAPTCHA. Đang chờ kết quả...');
+        await page.waitForTimeout(3000);
 
-      console.log(
-        '[FB-Login] Hãy tự hoàn thành CAPTCHA trong cửa sổ trình duyệt.'
-      );
+        // Kiểm tra xem captcha đã pass chưa (checkbox có class checked)
+        const stillVisible = await page.locator('iframe#captcha-recaptcha').isVisible().catch(() => false);
+        if (!stillVisible) {
+          console.log('[FB-Login] reCAPTCHA đã được giải thành công! Tiếp tục đăng nhập...');
+          captchaDetected = false; // reset để tiếp tục luồng bình thường
+        } else {
+          // Có thể hiện challenge hình ảnh, chụp screenshot
+          console.log('[FB-Login] reCAPTCHA yêu cầu thêm xác minh. Đang chờ...');
+        }
+      } catch (captchaErr) {
+        console.log('[FB-Login] Không thể tự động click reCAPTCHA:', captchaErr.message);
+      }
 
-      await page.bringToFront();
-    }
-
-    const cookies = await context.cookies(
-      'https://www.facebook.com'
-    );
-
-    const cUser = cookies.find(
-      cookie => cookie.name === 'c_user'
-    );
-
-    const xs = cookies.find(
-      cookie => cookie.name === 'xs'
-    );
-
-    if (cUser && xs) {
-      console.log(
-        '[FB-Login] Facebook đã tạo phiên đăng nhập.'
-      );
-
-      return {
-        success: true,
-        captchaDetected,
-        cookies,
-      };
-    }
-
-    const currentUrl = new URL(page.url());
-
-    const isLoginPage =
-      currentUrl.pathname.includes('/login');
-
-    const isCheckpoint =
-      currentUrl.pathname.includes('/checkpoint');
-
-    const isVerification =
-      currentUrl.pathname.includes(
-        '/two_step_verification'
-      );
-
-    if (
-      !captchaVisible &&
-      !isLoginPage &&
-      !isCheckpoint &&
-      !isVerification
-    ) {
-      await page.waitForTimeout(2000);
-
-      const updatedCookies =
-        await context.cookies(
-          'https://www.facebook.com'
-        );
-
-      const updatedCUser =
-        updatedCookies.find(
-          cookie => cookie.name === 'c_user'
-        );
-
-      const updatedXs =
-        updatedCookies.find(
-          cookie => cookie.name === 'xs'
-        );
-
-      if (updatedCUser && updatedXs) {
-        return {
-          success: true,
-          captchaDetected,
-          cookies: updatedCookies,
-        };
+      // Nếu vẫn còn captcha, chụp ảnh và chờ
+      if (captchaDetected && !waitingForCode) {
+        waitingForCode = true;
+        try {
+          const ssDir = path.join(process.cwd(), 'storage');
+          if (!fs.existsSync(ssDir)) fs.mkdirSync(ssDir, { recursive: true });
+          const ssPath = path.join(ssDir, 'fb-verification.png');
+          await page.screenshot({ path: ssPath, fullPage: false });
+          verificationState.pending = true;
+          verificationState.page = page;
+          verificationState.screenshotPath = ssPath;
+          console.log('[FB-Login] Đã chụp màn hình CAPTCHA. Cửa sổ trình duyệt đã mở — hãy tương tác trực tiếp để giải CAPTCHA.');
+        } catch (ssErr) {
+          console.log('[FB-Login] Không thể chụp màn hình:', ssErr.message);
+        }
       }
     }
 
-    console.log(
-      '[FB-Login] Đang chờ xác minh tại:',
-      currentUrl.pathname
-    );
+
+    // Kiểm tra cookie đăng nhập
+    const cookies = await context.cookies('https://www.facebook.com');
+    const cUser = cookies.find(cookie => cookie.name === 'c_user');
+    const xs = cookies.find(cookie => cookie.name === 'xs');
+
+    if (cUser && xs) {
+      verificationState.pending = false;
+      verificationState.page = null;
+      console.log('[FB-Login] Facebook đã tạo phiên đăng nhập.');
+      return { success: true, captchaDetected, cookies };
+    }
+
+    const currentUrl = new URL(page.url());
+    const isLoginPage = currentUrl.pathname.includes('/login');
+    const isCheckpoint = currentUrl.pathname.includes('/checkpoint');
+    const isVerification = currentUrl.pathname.includes('/two_step_verification');
+
+    // Khi gặp trang xác minh OTP/checkpoint, chụp ảnh và lưu trạng thái để frontend hiển thị
+    if ((isVerification || isCheckpoint) && !waitingForCode) {
+      waitingForCode = true;
+      try {
+        const ssDir = path.join(process.cwd(), 'storage');
+        if (!fs.existsSync(ssDir)) fs.mkdirSync(ssDir, { recursive: true });
+        const ssPath = path.join(ssDir, 'fb-verification.png');
+        await page.screenshot({ path: ssPath, fullPage: false });
+        verificationState.pending = true;
+        verificationState.page = page;
+        verificationState.screenshotPath = ssPath;
+        console.log('[FB-Login] Đã chụp màn hình xác minh. Đang chờ người dùng nhập mã từ giao diện...');
+      } catch (ssErr) {
+        console.log('[FB-Login] Không thể chụp màn hình:', ssErr.message);
+      }
+    }
+
+    // Cập nhật screenshot mỗi 3 giây khi đang chờ
+    if (waitingForCode && verificationState.screenshotPath) {
+      const now2 = Date.now();
+      if (!verificationState._lastSs || now2 - verificationState._lastSs > 3000) {
+        verificationState._lastSs = now2;
+        try { await page.screenshot({ path: verificationState.screenshotPath, fullPage: false }); } catch {}
+      }
+    }
+
+    if (!captchaVisible && !isLoginPage && !isCheckpoint && !isVerification) {
+      await page.waitForTimeout(2000);
+
+      const updatedCookies = await context.cookies('https://www.facebook.com');
+      const updatedCUser = updatedCookies.find(cookie => cookie.name === 'c_user');
+      const updatedXs = updatedCookies.find(cookie => cookie.name === 'xs');
+
+      if (updatedCUser && updatedXs) {
+        verificationState.pending = false;
+        verificationState.page = null;
+        return { success: true, captchaDetected, cookies: updatedCookies };
+      }
+    }
+
+    // Chỉ log khi URL thay đổi HOẶC đã qua 10 giây
+    const now = Date.now();
+    if (currentUrl.pathname !== lastLoggedPath || now - lastLogTime > 10000) {
+      lastLoggedPath = currentUrl.pathname;
+      lastLogTime = now;
+      const elapsed = Math.floor((now - startedAt) / 1000);
+
+      if (isVerification || isCheckpoint) {
+        if (waitingForCode) {
+          console.log(`[FB-Login] (${elapsed}s) Chờ người dùng nhập mã xác minh từ giao diện web.`);
+        } else {
+          console.log(`[FB-Login] (${elapsed}s) Đang chờ xác minh tại: ${currentUrl.pathname}`);
+        }
+      } else {
+        console.log(`[FB-Login] (${elapsed}s) Đang chờ xác minh tại: ${currentUrl.pathname}`);
+      }
+    }
 
     await page.waitForTimeout(1000);
   }
+
+  verificationState.pending = false;
+  verificationState.page = null;
 
   const error = new Error(
     captchaDetected
       ? 'Hết thời gian chờ người dùng hoàn thành CAPTCHA.'
       : 'Hết thời gian chờ Facebook hoàn tất đăng nhập.'
   );
-
-  error.code = captchaDetected
-    ? 'FB_CAPTCHA_TIMEOUT'
-    : 'FB_LOGIN_TIMEOUT';
-
+  error.code = captchaDetected ? 'FB_CAPTCHA_TIMEOUT' : 'FB_LOGIN_TIMEOUT';
   throw error;
 }
 
@@ -198,9 +244,9 @@ async function fbLogin(req, res) {
   
   let context = null;
   try {
-    console.log('[FB-Login] Đang khởi động trình duyệt giả lập với Persistent Context...');
+    console.log('[FB-Login] Đang khởi động trình duyệt...');
     context = await chromium.launchPersistentContext(profilePath, {
-      headless: true,
+      headless: false,
       ignoreDefaultArgs: ['--enable-automation'],
       args: [
         '--disable-gpu',
@@ -337,8 +383,239 @@ async function fbLogin(req, res) {
   }
 }
 
+// API: Lấy trạng thái xác minh
+async function getVerificationStatus(req, res) {
+  if (!verificationState.pending) {
+    return res.json({ pending: false });
+  }
+  return res.json({
+    pending: true,
+    screenshotUrl: '/api/config/fb-verification-screenshot?t=' + Date.now(),
+    viewport: { width: 1280, height: 900 }
+  });
+}
+
+// API: Lấy ảnh chụp màn hình xác minh
+async function getVerificationScreenshot(req, res) {
+  if (!verificationState.screenshotPath || !fs.existsSync(verificationState.screenshotPath)) {
+    return res.status(404).json({ error: 'Không có ảnh xác minh.' });
+  }
+  res.setHeader('Content-Type', 'image/png');
+  res.setHeader('Cache-Control', 'no-cache');
+  fs.createReadStream(verificationState.screenshotPath).pipe(res);
+}
+
+// API: Nhập mã xác minh từ người dùng
+async function submitVerificationCode(req, res) {
+  const { code } = req.body;
+  if (!code || !code.trim()) {
+    return res.status(400).json({ success: false, error: 'Vui lòng nhập mã xác minh.' });
+  }
+  if (!verificationState.pending || !verificationState.page) {
+    return res.status(400).json({ success: false, error: 'Hiện tại không có yêu cầu xác minh nào đang chờ.' });
+  }
+
+  try {
+    const page = verificationState.page;
+    
+    // Tìm các ô nhập mã (OTP thường là input type=text hoặc number)
+    const codeInput = page.locator(
+      'input[name="approvals_code"], input[name="code"], input[type="number"], input[placeholder*="mã"], input[aria-label*="mã"], input[aria-label*="cụm từ"], input[type="text"]'
+    ).first();
+
+    await codeInput.fill(code.trim());
+    await page.waitForTimeout(500);
+
+    // Click nút xác nhận
+    const submitBtn = page.locator(
+      'button[type="submit"], button:has-text("Tiếp tục"), button:has-text("Xác nhận"), button:has-text("Gửi"), [role="button"]:has-text("Tiếp tục"), [role="button"]:has-text("Xác nhận")'
+    ).first();
+
+    await submitBtn.click();
+    console.log(`[FB-Login] Người dùng đã nhập mã xác minh: ${code.trim()}. Đã gửi.`);
+    
+    // Cập nhật screenshot ngay sau khi gửi mã
+    await page.waitForTimeout(2000);
+    try { await page.screenshot({ path: verificationState.screenshotPath, fullPage: false }); } catch {}
+
+    return res.json({ success: true, message: 'Mã xác minh đã được gửi. Đang chờ Facebook xử lý...' });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: 'Lỗi khi nhập mã: ' + err.message });
+  }
+}
+
+// API: Click vào toạ độ trên màn hình trình duyệt ẩn (cho captcha hình ảnh)
+async function handleVerificationClick(req, res) {
+  const { x, y, viewportWidth, viewportHeight } = req.body;
+  if (x === undefined || y === undefined) {
+    return res.status(400).json({ success: false, error: 'Thiếu toạ độ click.' });
+  }
+  if (!verificationState.pending || !verificationState.page) {
+    return res.status(400).json({ success: false, error: 'Không có phiên xác minh nào đang chờ.' });
+  }
+
+  try {
+    const page = verificationState.page;
+    // Tính toạ độ thực tế trên viewport trình duyệt (1280x900)
+    const realX = Math.round((x / (viewportWidth || 1280)) * 1280);
+    const realY = Math.round((y / (viewportHeight || 900)) * 900);
+
+    await page.mouse.click(realX, realY);
+    console.log(`[FB-Login] Người dùng click toạ độ (${realX}, ${realY}) trên trình duyệt ẩn.`);
+
+    await page.waitForTimeout(1500);
+    // Cập nhật screenshot ngay sau click
+    try { await page.screenshot({ path: verificationState.screenshotPath, fullPage: false }); } catch {}
+
+    return res.json({ success: true, message: 'Đã click. Ảnh đang cập nhật...' });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: 'Lỗi click: ' + err.message });
+  }
+}
+
+// API: Proxy ảnh avatar Facebook qua backend (dùng cookie để xác thực)
+async function getFbAvatar(req, res) {
+  try {
+    const config = await readConfig();
+    const cookie = config.cookie;
+    if (!cookie) {
+      return res.status(404).json({ error: 'Chưa cấu hình cookie.' });
+    }
+
+    // Lấy UID từ cookie
+    const uidMatch = cookie.match(/c_user=(\d+)/);
+    if (!uidMatch) {
+      return res.status(404).json({ error: 'Không tìm thấy UID trong cookie.' });
+    }
+    const uid = uidMatch[1];
+
+    const cacheDir = path.join(process.cwd(), 'storage');
+    const cachePath = path.join(cacheDir, `avatar-${uid}.jpg`);
+
+    // Nếu đã có cache ảnh tĩnh, phục vụ ngay lập tức
+    if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 1000) {
+      res.setHeader('Content-Type', 'image/jpeg');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      return fs.createReadStream(cachePath).pipe(res);
+    }
+
+    // Nếu chưa có cache, chạy trình cào ngầm trong background để lấy và lưu cache ảnh đại diện
+    ensureAvatarCached(cookie, uid).catch(() => {});
+
+    // Trả về ảnh SVG Initials làm hình tạm thời
+    const fallbackUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${uid}`;
+    const https = require('https');
+    https.get(fallbackUrl, (fallbackRes) => {
+      res.setHeader('Content-Type', 'image/svg+xml');
+      res.setHeader('Cache-Control', 'no-cache');
+      fallbackRes.pipe(res);
+    }).on('error', () => {
+      res.status(404).end();
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// Helper: Chạy trình duyệt ẩn để cào ảnh đại diện thực tế từ facebook.com và lưu cache
+async function ensureAvatarCached(cookie, uid) {
+  const cacheDir = path.join(process.cwd(), 'storage');
+  const cachePath = path.join(cacheDir, `avatar-${uid}.jpg`);
+
+  // Nếu file cache đã tồn tại và không rỗng, bỏ qua
+  if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 1000) {
+    return true;
+  }
+
+  let context = null;
+  try {
+    const profilePath = path.resolve(process.cwd(), 'storage/facebook-browser-profile');
+    context = await chromium.launchPersistentContext(profilePath, {
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+
+    const pages = context.pages();
+    const page = pages[0] || await context.newPage();
+
+    // Điều hướng vào trang facebook
+    await page.goto('https://www.facebook.com/', { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+    await page.waitForTimeout(2000);
+
+    // Danh sách selectors ảnh đại diện trên giao diện chính hoặc menu góc trên
+    const selectors = [
+      'div[role="banner"] div[role="button"] img[src*="fbcdn"]',
+      'div[aria-label*="Trang cá nhân"] img[src*="fbcdn"]',
+      'div[aria-label*="Your profile"] img[src*="fbcdn"]',
+      'a[href*="/profile.php"] img[src*="fbcdn"]',
+      'img[src*="fbcdn.net/v/t39.30808-1"]'
+    ];
+
+    let avatarUrl = null;
+    for (const selector of selectors) {
+      const el = page.locator(selector).first();
+      if (await el.isVisible().catch(() => false)) {
+        const src = await el.getAttribute('src');
+        if (src && src.includes('fbcdn.net') && !src.includes('176159830277856')) {
+          avatarUrl = src;
+          break;
+        }
+      }
+    }
+
+    // Nếu không tìm thấy, đi tới trang cá nhân /me
+    if (!avatarUrl) {
+      await page.goto('https://www.facebook.com/me', { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+      await page.waitForTimeout(2000);
+
+      const profileSelectors = [
+        'a[role="link"] img[src*="fbcdn.net"]',
+        'svg[role="img"] image',
+        'g image',
+        'img[src*="fbcdn.net"]'
+      ];
+
+      for (const selector of profileSelectors) {
+        const locators = page.locator(selector);
+        const count = await locators.count().catch(() => 0);
+        for (let i = 0; i < count; i++) {
+          const el = locators.nth(i);
+          const src = await el.getAttribute('src').catch(() => null) || await el.getAttribute('xlink:href').catch(() => null);
+          if (src && src.includes('fbcdn.net') && !src.includes('176159830277856')) {
+            avatarUrl = src;
+            break;
+          }
+        }
+        if (avatarUrl) break;
+      }
+    }
+
+    if (avatarUrl) {
+      const response = await page.request.get(avatarUrl);
+      if (response.ok()) {
+        const buffer = await response.body();
+        if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
+        fs.writeFileSync(cachePath, buffer);
+        return true;
+      }
+    }
+  } catch (err) {
+    // Fail silently to keep log clean
+  } finally {
+    if (context) await context.close().catch(() => {});
+  }
+  return false;
+}
+
 module.exports = {
   getConfig,
   saveConfig,
-  fbLogin
+  fbLogin,
+  getVerificationStatus,
+  getVerificationScreenshot,
+  submitVerificationCode,
+  handleVerificationClick,
+  getFbAvatar,
 };
+
+

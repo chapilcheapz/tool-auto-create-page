@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { X, RefreshCw } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { X, RefreshCw, ShieldCheck, Loader2 } from 'lucide-react';
 import * as api from '../utils/api';
 
 export default function SettingsModal({ isOpen, onClose, showToast, onCookieChange, initialCookie }) {
@@ -20,11 +20,67 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passLoading, setPassLoading] = useState(false);
 
+  // States for verification modal
+  const [verification, setVerification] = useState({ pending: false, screenshotUrl: null });
+  const [verifyCode, setVerifyCode] = useState('');
+  const [verifyLoading, setVerifyLoading] = useState(false);
+  const [screenshotTs, setScreenshotTs] = useState(Date.now());
+  const pollRef = useRef(null);
+
+
   useEffect(() => {
     setCookieVal(initialCookie || '');
   }, [initialCookie]);
 
+  // Polling trạng thái xác minh FB khi đăng nhập
+  const startVerificationPolling = () => {
+    stopVerificationPolling();
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await fetch('/api/config/fb-verification-status', {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('jwt_token')}` }
+        });
+        const data = await res.json();
+        if (data.pending) {
+          setVerification({ pending: true, screenshotUrl: data.screenshotUrl });
+          setScreenshotTs(Date.now());
+        } else {
+          setVerification({ pending: false, screenshotUrl: null });
+        }
+      } catch {}
+    }, 2000);
+  };
+
+  const stopVerificationPolling = () => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+  };
+
+  const handleSubmitVerifyCode = async () => {
+    if (!verifyCode.trim()) return;
+    setVerifyLoading(true);
+    try {
+      const res = await fetch('/api/config/fb-verification-submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('jwt_token')}` },
+        body: JSON.stringify({ code: verifyCode.trim() })
+      });
+      const result = await res.json();
+      if (result.success) {
+        showToast('Mã xác minh đã được gửi. Đang chờ Facebook xử lý...', 'success');
+        setVerifyCode('');
+        setScreenshotTs(Date.now());
+      } else {
+        showToast(result.error || 'Gửi mã thất bại.', 'error');
+      }
+    } catch {
+      showToast('Lỗi kết nối máy chủ.', 'error');
+    } finally {
+      setVerifyLoading(false);
+    }
+  };
+
   if (!isOpen) return null;
+
 
   // Save Cookie handler
   const handleSaveCookie = async () => {
@@ -77,6 +133,7 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
 
     setFbLoginLoading(true);
     showToast('Bắt đầu tiến trình đăng nhập Facebook giả lập...', 'success');
+    startVerificationPolling();
 
     try {
       const response = await fetch('/api/config/fb-login', {
@@ -91,6 +148,7 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
 
       if (result.success) {
         showToast(`Đăng nhập FB thành công! UID: ${result.c_user}`, 'success');
+        setVerification({ pending: false, screenshotUrl: null });
         // reload config from server
         const configRes = await api.fetchConfig();
         if (configRes.success && configRes.cookie) {
@@ -99,13 +157,17 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
         }
       } else {
         showToast(result.error || 'Đăng nhập Facebook thất bại.', 'error');
+        setVerification({ pending: false, screenshotUrl: null });
       }
     } catch (error) {
       showToast(`Lỗi tiến trình: ${error.message}`, 'error');
+      setVerification({ pending: false, screenshotUrl: null });
     } finally {
       setFbLoginLoading(false);
+      stopVerificationPolling();
     }
   };
+
 
   // Change password handler
   const handleChangePassword = async (e) => {
@@ -138,6 +200,89 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
   const inactiveTabClass = 'flex-1 pb-2 text-xs font-bold text-[var(--text-muted)] hover:text-[var(--text-main)] bg-transparent border-none cursor-pointer text-center outline-none transition-all duration-200';
 
   return (
+    <>
+      {/* Modal xác minh Facebook 2FA/Captcha */}
+      {verification.pending && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
+          <div className="relative z-10 w-full max-w-[560px] mx-4 bg-[var(--bg-sidebar)] border border-[var(--border-main)] rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="flex items-center gap-3 p-4 border-b border-[var(--border-main)] bg-blue-500/10">
+              <ShieldCheck size={20} className="text-blue-400 shrink-0" />
+              <div>
+                <h3 className="text-sm font-bold text-[var(--text-main)]">Facebook yêu cầu xác minh</h3>
+                <p className="text-xs text-[var(--text-muted)] mt-0.5">Nhập mã từ SMS / Authenticator / hoặc đáp án theo hình bên dưới</p>
+              </div>
+            </div>
+
+            {/* Ảnh màn hình - click trực tiếp để tương tác */}
+            <div className="p-4 border-b border-[var(--border-main)]">
+              <div className="relative rounded-xl overflow-hidden border border-[var(--border-main)] bg-black/20">
+                <img
+                  key={screenshotTs}
+                  src={`/api/config/fb-verification-screenshot?t=${screenshotTs}`}
+                  alt="Màn hình xác minh Facebook"
+                  className="w-full h-auto max-h-[400px] object-contain cursor-crosshair"
+                  style={{ imageRendering: 'auto' }}
+                  onClick={async (e) => {
+                    const rect = e.target.getBoundingClientRect();
+                    const imgW = e.target.naturalWidth;
+                    const imgH = e.target.naturalHeight;
+                    const displayW = rect.width;
+                    const displayH = rect.height;
+                    // Tính toạ độ thực trên viewport gốc (1280x900)
+                    const clickX = ((e.clientX - rect.left) / displayW) * 1280;
+                    const clickY = ((e.clientY - rect.top) / displayH) * 900;
+                    try {
+                      await fetch('/api/config/fb-verification-click', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('jwt_token')}` },
+                        body: JSON.stringify({ x: clickX, y: clickY, viewportWidth: 1280, viewportHeight: 900 })
+                      });
+                      setTimeout(() => setScreenshotTs(Date.now()), 1500);
+                    } catch {}
+                  }}
+                  onError={(e) => { e.target.style.display='none'; }}
+                />
+                <button
+                  onClick={() => setScreenshotTs(Date.now())}
+                  className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/50 text-white hover:bg-black/70 transition-colors"
+                  title="Làm mới ảnh"
+                >
+                  <RefreshCw size={14} />
+                </button>
+              </div>
+              <p className="text-xs text-[var(--text-muted)] mt-2 text-center">
+                💡 Click trực tiếp vào ảnh để tương tác (giải captcha). Hoặc nhập mã OTP bên dưới.
+              </p>
+            </div>
+
+            {/* Ô nhập mã OTP */}
+            <div className="p-4">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={verifyCode}
+                  onChange={(e) => setVerifyCode(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSubmitVerifyCode()}
+                  placeholder="Nhập mã OTP / mã xác minh..."
+                  className="flex-1 px-3 py-2.5 text-sm rounded-xl bg-[var(--bg-card)] border border-[var(--border-main)] text-[var(--text-main)] placeholder-[var(--text-muted)] focus:outline-none focus:border-blue-400 transition-colors"
+                />
+                <button
+                  onClick={handleSubmitVerifyCode}
+                  disabled={verifyLoading || !verifyCode.trim()}
+                  className="px-4 py-2.5 text-sm font-semibold rounded-xl bg-blue-500 hover:bg-blue-600 disabled:opacity-50 text-white transition-colors flex items-center gap-2 shrink-0"
+                >
+                  {verifyLoading ? <Loader2 size={14} className="animate-spin" /> : null}
+                  Gửi mã
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* Modal cài đặt chính */}
     <div className="fixed inset-0 z-[100] flex items-center justify-center">
       {/* Overlay */}
       <div 
@@ -148,6 +293,7 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
       {/* Content */}
       <div className="relative z-10 w-full max-w-[500px] bg-[var(--bg-sidebar)] border border-[var(--border-main)] rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
         {/* Header */}
+
         <div className="flex justify-between items-center p-4 border-b border-[var(--border-main)] bg-white/2">
           <h2 className="text-sm font-bold text-[var(--text-main)] uppercase tracking-wider">Cấu hình hệ thống</h2>
           <button 
@@ -336,5 +482,6 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
         </div>
       </div>
     </div>
+    </>
   );
 }
