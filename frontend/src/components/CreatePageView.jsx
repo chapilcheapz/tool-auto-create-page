@@ -11,6 +11,7 @@ export default function CreatePageView({ cookie, showToast, onPageCreated }) {
   const [pageName, setPageName] = useState('');
   const [pageBio, setPageBio] = useState('');
   const [category, setCategory] = useState('2347428775505624');
+  const [pageCount, setPageCount] = useState('1');
   const [loading, setLoading] = useState(false);
 
   // Restore session logs on mount
@@ -36,84 +37,68 @@ export default function CreatePageView({ cookie, showToast, onPageCreated }) {
       return;
     }
 
+    const names = pageName.split('\n').map(n => n.trim()).filter(Boolean);
+    const pageNames = names.length > 0 ? names : [''];
+    const totalTarget = names.length > 1 ? names.length : (parseInt(pageCount, 10) || 1);
+
     setLoading(true);
+    setLogs([]);
+    setStats({ total: totalTarget, success: 0, fail: 0 });
+
     try {
       const body = {
         cookie,
-        customName: pageName.trim() || undefined,
+        pageNames,
         customBio: pageBio.trim() || undefined,
         category: category.trim() || undefined,
+        count: totalTarget
       };
 
       const result = await api.createPage(body);
 
-      const time = new Date().toLocaleTimeString('vi-VN', { 
-        hour: '2-digit', 
-        minute: '2-digit', 
-        second: '2-digit' 
-      });
+      if (result.success && result.campaignId) {
+        const campaignId = result.campaignId;
+        
+        // Khởi tạo luồng Server-Sent Events (SSE) để nhận log thời gian thực
+        const eventSource = new EventSource(`/api/campaigns/${campaignId}/stream`);
 
-      const logItem = {
-        success: result.success,
-        pageName: result.name || pageName.trim() || 'Tên ngẫu nhiên',
-        pageBio: result.bio || pageBio.trim() || 'Bio ngẫu nhiên',
-        pageId: result.pageId || '',
-        error: result.error || '',
-        time
-      };
+        eventSource.onmessage = (event) => {
+          const data = JSON.parse(event.data);
 
-      // Update states
-      const newStats = {
-        total: stats.total + 1,
-        success: stats.success + (result.success ? 1 : 0),
-        fail: stats.fail + (result.success ? 0 : 1)
-      };
-      setStats(newStats);
+          if (data.type === 'log') {
+            setLogs(prev => {
+              const updated = [...prev, data.log];
+              sessionStorage.setItem('session_creator_logs', JSON.stringify(updated));
+              return updated;
+            });
+            setStats(data.stats);
+            sessionStorage.setItem('session_creator_stats', JSON.stringify(data.stats));
+          } else if (data.type === 'history') {
+            setLogs(data.logs);
+            setStats(data.stats);
+            sessionStorage.setItem('session_creator_logs', JSON.stringify(data.logs));
+            sessionStorage.setItem('session_creator_stats', JSON.stringify(data.stats));
+          } else if (data.type === 'done') {
+            eventSource.close();
+            setLoading(false);
+            showToast('Đã hoàn thành tạo page hàng loạt!', 'success');
+            if (onPageCreated) onPageCreated();
+          }
+        };
 
-      const newLogs = [...logs, logItem];
-      setLogs(newLogs);
+        eventSource.onerror = (err) => {
+          eventSource.close();
+          setLoading(false);
+          showToast('Mất kết nối với luồng logs chiến dịch.', 'error');
+        };
 
-      // Save to sessionStorage
-      sessionStorage.setItem('session_creator_stats', JSON.stringify(newStats));
-      sessionStorage.setItem('session_creator_logs', JSON.stringify(newLogs));
-
-      if (result.success) {
-        showToast(`Tạo page thành công: ${result.name}`, 'success');
-        if (onPageCreated) onPageCreated(); // Trigger reload pages list
       } else {
-        showToast(`Tạo page thất bại: ${result.error}`, 'error');
+        showToast(result.error || 'Khởi tạo chiến dịch thất bại.', 'error');
+        setLoading(false);
       }
 
     } catch (error) {
-      const time = new Date().toLocaleTimeString('vi-VN', { 
-        hour: '2-digit', 
-        minute: '2-digit', 
-        second: '2-digit' 
-      });
-      const errLogItem = {
-        success: false,
-        pageName: 'Lỗi kết nối',
-        pageBio: error.message,
-        pageId: '',
-        error: error.message,
-        time
-      };
-
-      const newStats = {
-        total: stats.total + 1,
-        success: stats.success,
-        fail: stats.fail + 1
-      };
-      setStats(newStats);
-
-      const newLogs = [...logs, errLogItem];
-      setLogs(newLogs);
-
-      sessionStorage.setItem('session_creator_stats', JSON.stringify(newStats));
-      sessionStorage.setItem('session_creator_logs', JSON.stringify(newLogs));
-
-      showToast(`Lỗi kết nối: ${error.message}`, 'error');
-    } finally {
+      showToast(`Lỗi khởi tạo: ${error.message}`, 'error');
       setLoading(false);
     }
   };
@@ -165,13 +150,13 @@ export default function CreatePageView({ cookie, showToast, onPageCreated }) {
         <form onSubmit={handleCreatePage} className="space-y-4">
           <div className="flex flex-col gap-2">
             <label className="text-xs font-semibold text-[var(--text-muted)]" htmlFor="inputPageName">
-              Tên page (để trống = random)
+              Danh sách tên page (mỗi dòng 1 tên, để trống = random)
             </label>
-            <input
-              type="text"
+            <textarea
               id="inputPageName"
-              placeholder="Để trống để tự tạo ngẫu nhiên..."
-              className="w-full bg-[var(--input-bg)] border border-[var(--input-border)] rounded-lg px-4 py-2 text-sm text-[var(--text-main)] focus:outline-none focus:border-[var(--text-muted)] transition-all placeholder:text-[var(--text-muted)] outline-none"
+              placeholder="Ví dụ:&#10;Page Đồ gia dụng&#10;Page Thời trang nam&#10;Để trống để tự tạo ngẫu nhiên..."
+              rows="4"
+              className="w-full bg-[var(--input-bg)] border border-[var(--input-border)] rounded-lg px-4 py-2 text-sm text-[var(--text-main)] focus:outline-none focus:border-[var(--text-muted)] transition-all placeholder:text-[var(--text-muted)] outline-none resize-none"
               value={pageName}
               onChange={(e) => setPageName(e.target.value)}
               disabled={loading}
@@ -193,19 +178,37 @@ export default function CreatePageView({ cookie, showToast, onPageCreated }) {
             />
           </div>
 
-          <div className="flex flex-col gap-2">
-            <label className="text-xs font-semibold text-[var(--text-muted)]" htmlFor="inputCategory">
-              Category ID
-            </label>
-            <input
-              type="text"
-              id="inputCategory"
-              className="w-full bg-[var(--input-bg)] border border-[var(--input-border)] rounded-lg px-4 py-2 text-sm text-[var(--text-main)] focus:outline-none focus:border-[var(--text-muted)] transition-all outline-none"
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              disabled={loading}
-              required
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="flex flex-col gap-2">
+              <label className="text-xs font-semibold text-[var(--text-muted)]" htmlFor="inputCategory">
+                Category ID
+              </label>
+              <input
+                type="text"
+                id="inputCategory"
+                className="w-full bg-[var(--input-bg)] border border-[var(--input-border)] rounded-lg px-4 py-2 text-sm text-[var(--text-main)] focus:outline-none focus:border-[var(--text-muted)] transition-all outline-none"
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                disabled={loading}
+                required
+              />
+            </div>
+            
+            <div className="flex flex-col gap-2">
+              <label className="text-xs font-semibold text-[var(--text-muted)]" htmlFor="inputPageCount">
+                Số lượng page muốn tạo
+              </label>
+              <input
+                type="number"
+                id="inputPageCount"
+                min="1"
+                className="w-full bg-[var(--input-bg)] border border-[var(--input-border)] rounded-lg px-4 py-2 text-sm text-[var(--text-main)] focus:outline-none focus:border-[var(--text-muted)] transition-all outline-none"
+                value={pageCount}
+                onChange={(e) => setPageCount(e.target.value)}
+                disabled={loading}
+                required
+              />
+            </div>
           </div>
 
           <button
