@@ -9,6 +9,7 @@ const router = express.Router();
 
 // Unprotected routes for browser image tags
 router.post('/auth/login', authController.login);
+router.post('/auth/refresh', authController.refresh);
 router.get('/config/fb-avatar', configController.getFbAvatar);
 router.get('/config/fb-verification-screenshot', configController.getVerificationScreenshot);
 

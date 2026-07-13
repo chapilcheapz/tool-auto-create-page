@@ -16,7 +16,7 @@ async function initializeUsers() {
     }
 
     if (count === 0) {
-      const defaultPasswordHash = bcrypt.hashSync('admin', 10);
+      const defaultPasswordHash = await bcrypt.hash('admin', 10);
       await supabase
         .from('app_users')
         .insert({
@@ -71,8 +71,8 @@ async function updateUserPassword(username, newPassword) {
     const supabase = getSupabase();
     if (!supabase) throw new Error('Kết nối cơ sở dữ liệu thất bại');
     
-    const salt = bcrypt.genSaltSync(10);
-    const passwordHash = bcrypt.hashSync(newPassword, salt);
+    const salt = await bcrypt.genSalt(10);
+    const passwordHash = await bcrypt.hash(newPassword, salt);
     
     const { error } = await supabase
       .from('app_users')
@@ -113,8 +113,8 @@ async function createUser(username, email, password) {
     const supabase = getSupabase();
     if (!supabase) throw new Error('Kết nối cơ sở dữ liệu thất bại');
     
-    const salt = bcrypt.genSaltSync(10);
-    const passwordHash = bcrypt.hashSync(password, salt);
+    const salt = await bcrypt.genSalt(10);
+    const passwordHash = await bcrypt.hash(password, salt);
     
     const { error } = await supabase
       .from('app_users')
