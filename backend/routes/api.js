@@ -12,6 +12,7 @@ router.post('/auth/login', authController.login);
 router.post('/auth/refresh', authController.refresh);
 router.get('/config/fb-avatar', configController.getFbAvatar);
 router.get('/config/fb-verification-screenshot', configController.getVerificationScreenshot);
+router.get('/campaigns/:id/stream', pageController.streamCampaignLogs);
 
 // Protected routes using authMiddleware
 router.use(authMiddleware);
