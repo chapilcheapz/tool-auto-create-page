@@ -24,7 +24,7 @@ async function login(req, res) {
       return res.status(401).json({ success: false, error: 'Tài khoản không có quyền đăng nhập hệ thống.' });
     }
 
-    const isMatch = bcrypt.compareSync(password, user.password);
+    const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(401).json({ success: false, error: 'Tài khoản hoặc mật khẩu không chính xác.' });
     }
@@ -38,9 +38,19 @@ async function login(req, res) {
       { expiresIn }
     );
 
+    // Sign Refresh Token using JWT_SECRET + user.password (Security seed)
+    const refreshSecret = getJwtSecret() + user.password;
+    const refreshExpiresIn = process.env.REFRESH_TOKEN_EXPIRES_DAYS ? `${process.env.REFRESH_TOKEN_EXPIRES_DAYS}d` : '30d';
+    const refreshToken = jwt.sign(
+      { username: displayUsername },
+      refreshSecret,
+      { expiresIn: refreshExpiresIn }
+    );
+
     return res.json({
       success: true,
       token,
+      refreshToken,
       user: {
         username: displayUsername
       }
@@ -72,7 +82,7 @@ async function changePassword(req, res) {
       return res.status(404).json({ success: false, error: 'Không tìm thấy người dùng.' });
     }
 
-    const isMatch = bcrypt.compareSync(currentPassword, user.password);
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
     if (!isMatch) {
       return res.status(400).json({ success: false, error: 'Mật khẩu hiện tại không chính xác.' });
     }
@@ -119,8 +129,66 @@ async function register(req, res) {
   }
 }
 
+async function refresh(req, res) {
+  const { refreshToken } = req.body;
+  if (!refreshToken) {
+    return res.status(400).json({ success: false, error: 'Thiếu Refresh Token.' });
+  }
+
+  try {
+    // Decode without verification first to extract payload (username)
+    const decodedPayload = jwt.decode(refreshToken);
+    if (!decodedPayload || !decodedPayload.username) {
+      return res.status(401).json({ success: false, error: 'Refresh Token không hợp lệ.' });
+    }
+
+    const username = decodedPayload.username;
+    
+    // Fetch user from DB to get current password hash for verifying signature
+    const user = await userService.findUserByUsername(username);
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'Người dùng không tồn tại.' });
+    }
+
+    // Verify signature using JWT_SECRET + user.password (Security seed)
+    const refreshSecret = getJwtSecret() + user.password;
+    
+    let decoded;
+    try {
+      decoded = jwt.verify(refreshToken, refreshSecret);
+    } catch (err) {
+      return res.status(401).json({ success: false, error: 'Phiên đăng nhập đã hết hạn hoặc mật khẩu đã thay đổi. Vui lòng đăng nhập lại.' });
+    }
+
+    // Issue new Access Token
+    const expiresIn = process.env.JWT_EXPIRES_IN || '15m';
+    const token = jwt.sign(
+      { username: decoded.username },
+      getJwtSecret(),
+      { expiresIn }
+    );
+
+    // Issue new Refresh Token (Rotation)
+    const refreshExpiresIn = process.env.REFRESH_TOKEN_EXPIRES_DAYS ? `${process.env.REFRESH_TOKEN_EXPIRES_DAYS}d` : '30d';
+    const newRefreshToken = jwt.sign(
+      { username: decoded.username },
+      refreshSecret,
+      { expiresIn: refreshExpiresIn }
+    );
+
+    return res.json({
+      success: true,
+      token,
+      refreshToken: newRefreshToken
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+}
+
 module.exports = {
   login,
   changePassword,
-  register
+  register,
+  refresh
 };

@@ -36,8 +36,18 @@ async function writeConfig(cookieValue) {
   }
 }
 
+const crypto = require('crypto');
+let dynamicJwtSecret = null;
+
 function getJwtSecret() {
-  return process.env.JWT_SECRET || 'fallback_super_secret_key_12345';
+  if (process.env.JWT_SECRET) {
+    return process.env.JWT_SECRET;
+  }
+  if (!dynamicJwtSecret) {
+    dynamicJwtSecret = crypto.randomBytes(32).toString('hex');
+    console.warn('⚠️ Cảnh báo: process.env.JWT_SECRET trống. Đã tạo một JWT_SECRET ngẫu nhiên cho phiên chạy này.');
+  }
+  return dynamicJwtSecret;
 }
 
 module.exports = {
