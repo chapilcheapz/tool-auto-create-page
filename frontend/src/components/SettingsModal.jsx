@@ -253,11 +253,11 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
             <div className="p-4 border-b border-[var(--border-main)]">
               <div className="relative rounded-xl overflow-hidden border border-[var(--border-main)] bg-black/20">
                 <img
-                  key={screenshotTs}
                   src={`/api/config/fb-verification-screenshot?t=${screenshotTs}`}
                   alt="Màn hình xác minh Facebook"
                   className="w-full h-auto max-h-[400px] object-contain cursor-crosshair"
                   style={{ imageRendering: 'auto' }}
+
                   onClick={async (e) => {
                     const rect = e.target.getBoundingClientRect();
                     const imgW = e.target.naturalWidth;
