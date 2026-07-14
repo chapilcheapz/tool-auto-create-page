@@ -8,9 +8,11 @@
   ],
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js",
-    "build:frontend": "npm run build -w frontend",
-    "dev:frontend": "npm run dev -w frontend"
+    "dev:backend": "node server.js",
+    "dev:frontend": "npm run dev -w frontend",
+    "dev": "concurrently --kill-others-on-fail \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "build:frontend": "npm run build -w frontend"
+
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.2",
@@ -22,5 +24,8 @@
     "express": "^4.21.0",
     "jsonwebtoken": "^9.0.3",
     "playwright": "^1.61.1"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.3"
   }
 }
