@@ -18,6 +18,9 @@ export default function LoginView({ onLoginSuccess, showToast }) {
       const result = await api.login(username, password);
       if (result.success && result.token) {
         localStorage.setItem('jwt_token', result.token);
+        if (result.refreshToken) {
+          localStorage.setItem('refresh_token', result.refreshToken);
+        }
         if (result.user && result.user.username) {
           localStorage.setItem('username', result.user.username);
         } else {
