@@ -13,6 +13,10 @@ const verificationState = {
   _lastSs: null,
 };
 
+// Bộ nhớ đệm lưu URL ảnh đại diện Facebook (tránh tải/ghi file xuống đĩa cứng)
+const memoryAvatarCache = {}; // { [uid]: { url: string, expiresAt: number } }
+
+
 
 // Base32 decoding helper
 function base32Decode(base32) {
@@ -483,27 +487,36 @@ async function getFbAvatar(req, res) {
       return res.status(404).json({ error: 'Chưa cấu hình cookie.' });
     }
 
-    // Lấy UID từ cookie
-    const uidMatch = cookie.match(/c_user=(\d+)/);
+    // Lấy cookie của tài khoản đầu tiên (Primary Account)
+    const primaryCookie = cookie.split('\n').map(c => c.trim()).filter(Boolean)[0] || cookie;
+
+    // Lấy UID từ primary cookie
+    const uidMatch = primaryCookie.match(/c_user=(\d+)/);
     if (!uidMatch) {
       return res.status(404).json({ error: 'Không tìm thấy UID trong cookie.' });
     }
     const uid = uidMatch[1];
 
-    const cacheDir = path.join(process.cwd(), 'storage');
-    const cachePath = path.join(cacheDir, `avatar-${uid}.jpg`);
-
-    // Nếu đã có cache ảnh tĩnh, phục vụ ngay lập tức
-    if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 1000) {
-      res.setHeader('Content-Type', 'image/jpeg');
-      res.setHeader('Cache-Control', 'public, max-age=86400');
-      return fs.createReadStream(cachePath).pipe(res);
+    // Kiểm tra cache trong bộ nhớ
+    const cache = memoryAvatarCache[uid];
+    if (cache && cache.url && cache.expiresAt > Date.now()) {
+      try {
+        const axios = require('axios');
+        const imgRes = await axios.get(cache.url, { responseType: 'arraybuffer', timeout: 8000 });
+        res.setHeader('Content-Type', 'image/jpeg');
+        res.setHeader('Cache-Control', 'public, max-age=3600');
+        return res.send(imgRes.data);
+      } catch (err) {
+        console.error('❌ [Avatar-Stream] Lỗi khi tải ảnh từ Facebook CDN:', err.message);
+        // Nếu link CDN lỗi (ví dụ hết hạn), xóa cache để lần sau cào lại URL mới
+        delete memoryAvatarCache[uid];
+      }
     }
 
-    // Nếu chưa có cache, chạy trình cào ngầm trong background để lấy và lưu cache ảnh đại diện
-    ensureAvatarCached(cookie, uid).catch(() => {});
+    // Nếu chưa có cache hoặc hết hạn, chạy trình cào ngầm trong background để lấy URL mới
+    ensureAvatarCached(primaryCookie, uid).catch(() => {});
 
-    // Trả về ảnh SVG Initials làm hình tạm thời
+    // Trả về ảnh SVG Initials làm hình tạm thời qua stream trực tiếp
     const fallbackUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${uid}`;
     const https = require('https');
     https.get(fallbackUrl, (fallbackRes) => {
@@ -518,13 +531,11 @@ async function getFbAvatar(req, res) {
   }
 }
 
-// Helper: Chạy trình duyệt ẩn để cào ảnh đại diện thực tế từ facebook.com và lưu cache
+// Helper: Chạy trình duyệt ẩn để lấy URL ảnh đại diện thực tế từ facebook.com và lưu vào bộ nhớ
 async function ensureAvatarCached(cookie, uid) {
-  const cacheDir = path.join(process.cwd(), 'storage');
-  const cachePath = path.join(cacheDir, `avatar-${uid}.jpg`);
-
-  // Nếu file cache đã tồn tại và không rỗng, bỏ qua
-  if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 1000) {
+  // Nếu đã có cache và chưa hết hạn, bỏ qua
+  const cache = memoryAvatarCache[uid];
+  if (cache && cache.url && cache.expiresAt > Date.now()) {
     return true;
   }
 
@@ -533,11 +544,36 @@ async function ensureAvatarCached(cookie, uid) {
     const profilePath = path.resolve(process.cwd(), 'storage/facebook-browser-profile');
     context = await chromium.launchPersistentContext(profilePath, {
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+      ignoreDefaultArgs: ['--enable-automation'],
+      args: [
+        '--disable-gpu',
+        '--mute-audio',
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-blink-features=AutomationControlled'
+      ]
     });
 
     const pages = context.pages();
     const page = pages[0] || await context.newPage();
+
+    // Set cookies for facebook to authenticate the session
+    if (cookie) {
+      const cookieParts = cookie.split(';').map(part => part.trim());
+      const playwrightCookies = [];
+      for (const part of cookieParts) {
+        const eqPos = part.indexOf('=');
+        if (eqPos > 0) {
+          playwrightCookies.push({
+            name: part.slice(0, eqPos),
+            value: part.slice(eqPos + 1),
+            domain: '.facebook.com',
+            path: '/'
+          });
+        }
+      }
+      await context.addCookies(playwrightCookies);
+    }
 
     // Điều hướng vào trang facebook
     await page.goto('https://www.facebook.com/', { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
@@ -592,20 +628,83 @@ async function ensureAvatarCached(cookie, uid) {
     }
 
     if (avatarUrl) {
-      const response = await page.request.get(avatarUrl);
-      if (response.ok()) {
-        const buffer = await response.body();
-        if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
-        fs.writeFileSync(cachePath, buffer);
-        return true;
-      }
+      // Lưu trữ URL ảnh đại diện vào bộ nhớ đệm (thời hạn 2 giờ để phòng trường hợp link CDN hết hạn)
+      memoryAvatarCache[uid] = {
+        url: avatarUrl,
+        expiresAt: Date.now() + 2 * 60 * 60 * 1000 // 2 giờ
+      };
+      return true;
     }
   } catch (err) {
-    // Fail silently to keep log clean
+    console.error('❌ [Avatar-Scraper] Lỗi khi lấy URL ảnh đại diện:', err.message);
   } finally {
     if (context) await context.close().catch(() => {});
   }
   return false;
+}
+
+async function diagnoseCookies(req, res) {
+  try {
+    const config = await readConfig();
+    const cookie = config.cookie;
+    if (!cookie) {
+      return res.json({ success: true, diagnoses: [] });
+    }
+
+    const cookieList = cookie.split('\n').map(c => c.trim()).filter(Boolean);
+    const diagnoses = [];
+
+    const facebookService = require('../services/facebookService');
+    const { extractTokens } = require('../utils/extract-tokens');
+
+    for (let i = 0; i < cookieList.length; i++) {
+      const singleCookie = cookieList[i];
+      const uidMatch = singleCookie.match(/c_user=(\d+)/);
+      const uid = uidMatch ? uidMatch[1] : `Unknown-${i + 1}`;
+
+      if (!uidMatch) {
+        diagnoses.push({
+          uid,
+          status: 'invalid',
+          error: 'Thiếu cookie c_user',
+          pagesCount: 0
+        });
+        continue;
+      }
+
+      try {
+        const tokens = await extractTokens(singleCookie);
+        if (!tokens.success) {
+          diagnoses.push({
+            uid,
+            status: 'expired',
+            error: tokens.error || 'Lỗi trích xuất token',
+            pagesCount: 0
+          });
+          continue;
+        }
+
+        // Gọi thử lấy trang để xác minh cookie hoạt động
+        const pages = await facebookService.getPages(singleCookie);
+        diagnoses.push({
+          uid,
+          status: 'active',
+          pagesCount: pages.length
+        });
+      } catch (err) {
+        diagnoses.push({
+          uid,
+          status: 'expired',
+          error: err.message,
+          pagesCount: 0
+        });
+      }
+    }
+
+    return res.json({ success: true, diagnoses });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
 }
 
 module.exports = {
@@ -617,6 +716,7 @@ module.exports = {
   submitVerificationCode,
   handleVerificationClick,
   getFbAvatar,
+  diagnoseCookies,
 };
 
 

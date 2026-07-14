@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, RefreshCw, ShieldCheck, Loader2 } from 'lucide-react';
+import { X, RefreshCw, ShieldCheck, Loader2, Plus, Trash2 } from 'lucide-react';
 import * as api from '../utils/api';
 
 export default function SettingsModal({ isOpen, onClose, showToast, onCookieChange, initialCookie }) {
   const [activeTab, setActiveTab] = useState('cookie'); // 'cookie' | 'login' | 'password'
   
   // States for cookie tab
-  const [cookieVal, setCookieVal] = useState(initialCookie || '');
+  const [cookies, setCookies] = useState(['']);
 
   // States for FB Login tab
   const [fbUsername, setFbUsername] = useState('');
@@ -27,9 +27,42 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
   const [screenshotTs, setScreenshotTs] = useState(Date.now());
   const pollRef = useRef(null);
 
+  // Diagnostics states
+  const [diagnoses, setDiagnoses] = useState({});
+  const [diagnosing, setDiagnosing] = useState(false);
+
+  const runDiagnostics = async () => {
+    setDiagnosing(true);
+    try {
+      const res = await api.diagnoseCookies();
+      if (res.success && res.diagnoses) {
+        const nextDiagnoses = {};
+        res.diagnoses.forEach(d => {
+          nextDiagnoses[d.uid] = d;
+        });
+        setDiagnoses(nextDiagnoses);
+      }
+    } catch (e) {
+      console.error('Lỗi chạy chẩn đoán cookie:', e.message);
+    } finally {
+      setDiagnosing(false);
+    }
+  };
 
   useEffect(() => {
-    setCookieVal(initialCookie || '');
+    if (isOpen) {
+      runDiagnostics();
+    }
+  }, [isOpen]);
+
+
+  useEffect(() => {
+    if (initialCookie) {
+      const parts = initialCookie.split('\n').map(c => c.trim()).filter(Boolean);
+      setCookies(parts.length > 0 ? parts : ['']);
+    } else {
+      setCookies(['']);
+    }
   }, [initialCookie]);
 
   // Polling trạng thái xác minh FB khi đăng nhập
@@ -84,17 +117,19 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
 
   // Save Cookie handler
   const handleSaveCookie = async () => {
-    const val = cookieVal.trim();
-    if (!val) {
-      showToast('Vui lòng nhập cookie!', 'error');
+    const cleanCookies = cookies.map(c => c.trim()).filter(Boolean);
+    if (cleanCookies.length === 0) {
+      showToast('Vui lòng nhập ít nhất một cookie!', 'error');
       return;
     }
 
+    const val = cleanCookies.join('\n');
     try {
       const result = await api.saveConfig(val);
       if (result.success) {
         showToast('Đã lưu cấu hình cookie thành công!', 'success');
         onCookieChange(val);
+        await runDiagnostics();
       } else {
         showToast(`Không thể lưu cấu hình: ${result.error}`, 'error');
       }
@@ -109,7 +144,7 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
       const result = await api.saveConfig('');
       if (result.success) {
         showToast('Đã xoá cấu hình cookie thành công!', 'success');
-        setCookieVal('');
+        setCookies(['']);
         onCookieChange('');
       } else {
         showToast(`Không thể xoá cấu hình: ${result.error}`, 'error');
@@ -331,18 +366,85 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
           {/* Panel 1: Paste Cookie */}
           {activeTab === 'cookie' && (
             <div className="space-y-4 animate-in fade-in duration-200">
-              <div className="flex flex-col gap-2">
-                <label className="text-xs font-semibold text-[var(--text-muted)]" htmlFor="inputCookie">Cookie Facebook</label>
-                <textarea 
-                  id="inputCookie" 
-                  rows="3"
-                  className="w-full bg-[var(--input-bg)] border border-[var(--input-border)] rounded-lg px-4 py-2 text-sm text-[var(--text-main)] focus:outline-none focus:border-[var(--text-muted)] transition-all placeholder:text-[var(--text-muted)] outline-none"
-                  placeholder="Dán cookie từ trình duyệt Facebook vào đây..."
-                  value={cookieVal}
-                  onChange={(e) => setCookieVal(e.target.value)}
-                ></textarea>
-                <p className="text-[11px] text-[var(--text-muted)] leading-normal">
-                  Chỉ cần nhập cookie — các token sẽ được tự động trích xuất khi tiến hành các tác vụ tiếp theo.
+              <div className="flex flex-col gap-3 max-h-[300px] overflow-y-auto pr-1">
+                <label className="text-xs font-semibold text-[var(--text-muted)]">Danh sách Cookie Facebook</label>
+                {cookies.map((cookieItem, idx) => (
+                  <div key={idx} className="flex gap-2 items-start relative group">
+                    <div className="flex-grow flex flex-col gap-1">
+                      <span className="text-[10px] font-semibold text-purple-400">Tài khoản #{idx + 1} {idx === 0 && '(Chính)'}</span>
+                      <textarea 
+                        rows="2"
+                        className="w-full bg-[var(--input-bg)] border border-[var(--input-border)] rounded-lg px-4 py-2 text-xs text-[var(--text-main)] focus:outline-none focus:border-[var(--text-muted)] transition-all placeholder:text-[var(--text-muted)] outline-none resize-none"
+                        placeholder={`Dán cookie của tài khoản Facebook #${idx + 1} vào đây...`}
+                        value={cookieItem}
+                        onChange={(e) => {
+                          const nextCookies = [...cookies];
+                          nextCookies[idx] = e.target.value;
+                          setCookies(nextCookies);
+                        }}
+                      ></textarea>
+                      {/* Badge trạng thái chẩn đoán tài khoản */}
+                      {(() => {
+                        const getUid = (cookieString) => {
+                          const match = cookieString.match(/c_user=(\d+)/);
+                          return match ? match[1] : null;
+                        };
+                        const uid = getUid(cookieItem);
+                        if (!uid) return null;
+                        const diag = diagnoses[uid];
+                        return (
+                          <div className="text-[10px] flex items-center gap-1.5 mt-0.5">
+                            {diag ? (
+                              diag.status === 'active' ? (
+                                <span className="text-emerald-400 font-semibold flex items-center gap-0.5">
+                                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                                  Đang hoạt động ✅ (Có {diag.pagesCount} Page)
+                                </span>
+                              ) : (
+                                <span className="text-red-400 font-semibold flex items-center gap-0.5" title={diag.error || 'Phiên hết hạn'}>
+                                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-400"></span>
+                                  Hết hạn / Yêu cầu đăng nhập lại ❌
+                                </span>
+                              )
+                            ) : (
+                              diagnosing ? (
+                                <span className="text-zinc-500 flex items-center gap-1">
+                                  <Loader2 size={10} className="animate-spin text-purple-400" />
+                                  Đang kiểm tra...
+                                </span>
+                              ) : (
+                                <span className="text-zinc-500">Chưa kiểm tra (Bấm Lưu cấu hình để chẩn đoán)</span>
+                              )
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                    {cookies.length > 1 && (
+                      <button
+                        onClick={() => {
+                          const nextCookies = cookies.filter((_, i) => i !== idx);
+                          setCookies(nextCookies);
+                        }}
+                        className="mt-6 bg-red-500/10 hover:bg-red-500/20 text-red-400 p-2 rounded-lg border-none cursor-pointer transition-colors shrink-0"
+                        title="Xoá tài khoản này"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                
+                <button
+                  onClick={() => setCookies([...cookies, ''])}
+                  className="flex items-center justify-center gap-1 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 py-2 rounded-lg text-[11px] font-semibold transition-all cursor-pointer border border-dashed border-purple-500/30"
+                >
+                  <Plus size={12} />
+                  <span>Thêm tài khoản Facebook</span>
+                </button>
+
+                <p className="text-[11px] text-[var(--text-muted)] leading-normal mt-1">
+                  Nhập danh sách cookie của các tài khoản Facebook. Hệ thống sẽ gom danh sách Page và chạy cảm xúc đồng thời.
                 </p>
               </div>
               <div className="flex gap-3 pt-2">
@@ -356,7 +458,7 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
                   onClick={handleClearCookie}
                   className="bg-[var(--btn-sec-bg)] hover:bg-[var(--btn-sec-bg)]/90 text-[var(--btn-sec-text)] border border-[var(--btn-sec-border)] py-2 px-5 rounded-lg text-xs font-semibold transition-all active:scale-98 cursor-pointer"
                 >
-                  Xoá cookie
+                  Xoá tất cả cookie
                 </button>
               </div>
             </div>
