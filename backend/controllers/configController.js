@@ -13,8 +13,8 @@ const verificationState = {
   _lastSs: null,
 };
 
-// Bộ nhớ đệm lưu URL ảnh đại diện Facebook (tránh tải/ghi file xuống đĩa cứng)
-const memoryAvatarCache = {}; // { [uid]: { url: string, expiresAt: number } }
+// Bộ nhớ đệm lưu BYTES ảnh đại diện Facebook trực tiếp (tránh CDN URL hết hạn hoặc cần auth)
+const memoryAvatarCache = {}; // { [uid]: { bytes: Buffer, contentType: string, expiresAt: number } }
 
 
 
@@ -478,45 +478,59 @@ async function handleVerificationClick(req, res) {
   }
 }
 
-// API: Proxy ảnh avatar Facebook qua backend (dùng cookie để xác thực)
+// API: Proxy ảnh avatar Facebook qua backend
+// Hỗ trợ query param ?uid= để lấy đúng avatar theo từng tài khoản
 async function getFbAvatar(req, res) {
   try {
     const config = await readConfig();
-    const cookie = config.cookie;
-    if (!cookie) {
+    const cookieRaw = config.cookie;
+    if (!cookieRaw) {
       return res.status(404).json({ error: 'Chưa cấu hình cookie.' });
     }
 
-    // Lấy cookie của tài khoản đầu tiên (Primary Account)
-    const primaryCookie = cookie.split('\n').map(c => c.trim()).filter(Boolean)[0] || cookie;
+    const cookieList = cookieRaw.split('\n').map(c => c.trim()).filter(Boolean);
 
-    // Lấy UID từ primary cookie
-    const uidMatch = primaryCookie.match(/c_user=(\d+)/);
+    // Nếu client truyền ?uid=xxx thì tìm đúng cookie của uid đó, nếu không thì lấy tài khoản đầu tiên
+    const requestedUid = req.query.uid ? String(req.query.uid) : null;
+    let targetCookie = cookieList[0] || cookieRaw;
+
+    if (requestedUid) {
+      const found = cookieList.find(c => {
+        const m = c.match(/c_user=(\d+)/);
+        return m && m[1] === requestedUid;
+      });
+      if (found) targetCookie = found;
+    }
+
+    // Lấy UID từ cookie đã chọn
+    const uidMatch = targetCookie.match(/c_user=(\d+)/);
     if (!uidMatch) {
       return res.status(404).json({ error: 'Không tìm thấy UID trong cookie.' });
     }
     const uid = uidMatch[1];
+    console.log(`[Avatar] Request avatar uid=${uid}`);
 
-    // Kiểm tra cache trong bộ nhớ
+    // Kiểm tra cache bytes trong bộ nhớ (cache lưu BYTES, không phải URL)
     const cache = memoryAvatarCache[uid];
-    if (cache && cache.url && cache.expiresAt > Date.now()) {
-      try {
-        const axios = require('axios');
-        const imgRes = await axios.get(cache.url, { responseType: 'arraybuffer', timeout: 8000 });
-        res.setHeader('Content-Type', 'image/jpeg');
-        res.setHeader('Cache-Control', 'public, max-age=3600');
-        return res.send(imgRes.data);
-      } catch (err) {
-        console.error('❌ [Avatar-Stream] Lỗi khi tải ảnh từ Facebook CDN:', err.message);
-        // Nếu link CDN lỗi (ví dụ hết hạn), xóa cache để lần sau cào lại URL mới
-        delete memoryAvatarCache[uid];
-      }
+    if (cache && cache.bytes && cache.expiresAt > Date.now()) {
+      console.log(`[Avatar] Cache hit uid=${uid}, serving ${cache.bytes.length} bytes`);
+      res.setHeader('Content-Type', cache.contentType || 'image/jpeg');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      return res.send(cache.bytes);
     }
 
-    // Nếu chưa có cache hoặc hết hạn, chạy trình cào ngầm trong background để lấy URL mới
-    ensureAvatarCached(primaryCookie, uid).catch(() => {});
+    console.log(`[Avatar] Cache miss uid=${uid}, fetching...`);
+    // Thử lấy ảnh đồng bộ để phục vụ ngay (không chờ background)
+    const fetched = await fetchAvatarBytes(targetCookie, uid);
+    if (fetched) {
+      console.log(`[Avatar] Fetched uid=${uid} OK, serving ${fetched.bytes.length} bytes`);
+      res.setHeader('Content-Type', fetched.contentType || 'image/jpeg');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      return res.send(fetched.bytes);
+    }
 
-    // Trả về ảnh SVG Initials làm hình tạm thời qua stream trực tiếp
+    // Fallback: trả về ảnh SVG Initials nếu không lấy được
+    console.log(`[Avatar] Fallback to dicebear uid=${uid}`);
     const fallbackUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${uid}`;
     const https = require('https');
     https.get(fallbackUrl, (fallbackRes) => {
@@ -527,68 +541,259 @@ async function getFbAvatar(req, res) {
       res.status(404).end();
     });
   } catch (err) {
+    console.error('[Avatar] Unhandled error:', err.message);
     res.status(500).json({ error: err.message });
   }
 }
 
-// Helper: Chạy trình duyệt ẩn để lấy URL ảnh đại diện thực tế từ facebook.com và lưu vào bộ nhớ
-async function ensureAvatarCached(cookie, uid) {
-  // Nếu đã có cache và chưa hết hạn, bỏ qua
+// Helper: Lấy bytes ảnh avatar THẬT từ Facebook và cache vào bộ nhớ
+// ƯU TIÊN:
+//   1. mbasic.facebook.com profile scrape (nhẹ nhất, cookie-authenticated, luôn trả ảnh thật)
+//   2. Facebook homepage HTML scrape (extractTokens đã fetch HTML, tìm avatar trong đó)
+//   3. Graph API redirect (chỉ dùng nếu kết quả > 5KB — bỏ qua ảnh silhouette mặc định 1876 bytes)
+// Cache BYTES trực tiếp để tránh vấn đề CDN cần Cookie header
+async function fetchAvatarBytes(cookie, uid) {
+  // Nếu đã có cache bytes và chưa hết hạn, trả về luôn
   const cache = memoryAvatarCache[uid];
-  if (cache && cache.url && cache.expiresAt > Date.now()) {
-    return true;
+  if (cache && cache.bytes && cache.expiresAt > Date.now()) {
+    return cache;
   }
 
-  let context = null;
+  const axios = require('axios');
+  const commonHeaders = {
+    'Cookie': cookie,
+    'User-Agent': 'Mozilla/5.0 (Linux; Android 12; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7'
+  };
+
+  // ─── Phương án 1: Scrape mbasic.facebook.com (nhẹ, nhanh, cookie-auth) ───
   try {
-    const profilePath = path.resolve(process.cwd(), 'storage/facebook-browser-profile');
-    context = await chromium.launchPersistentContext(profilePath, {
-      headless: true,
-      ignoreDefaultArgs: ['--enable-automation'],
-      args: [
-        '--disable-gpu',
-        '--mute-audio',
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-blink-features=AutomationControlled'
-      ]
+    console.log(`[Avatar-mbasic] uid=${uid} đang scrape mbasic.facebook.com...`);
+    const mbasicRes = await axios.get(`https://mbasic.facebook.com/profile.php?id=${uid}`, {
+      headers: commonHeaders,
+      timeout: 10000,
+      maxRedirects: 5
     });
+    const html = typeof mbasicRes.data === 'string' ? mbasicRes.data : '';
 
-    const pages = context.pages();
-    const page = pages[0] || await context.newPage();
+    // Tìm URL ảnh đại diện trong HTML mbasic
+    // mbasic profile picture thường nằm trong thẻ <img> với src chứa fbcdn.net
+    // và có các pattern path đặc trưng cho profile picture
+    const imgPatterns = [
+      // Profile picture thumbnail trên mbasic
+      /<img[^>]+src="(https?:\/\/[^"]*?scontent[^"]*?fbcdn\.net[^"]*?)"/gi,
+      /<img[^>]+src="(https?:\/\/[^"]*?fbcdn\.net[^"]*?)"/gi,
+    ];
 
-    // Set cookies for facebook to authenticate the session
-    if (cookie) {
-      const cookieParts = cookie.split(';').map(part => part.trim());
-      const playwrightCookies = [];
-      for (const part of cookieParts) {
-        const eqPos = part.indexOf('=');
-        if (eqPos > 0) {
-          playwrightCookies.push({
-            name: part.slice(0, eqPos),
-            value: part.slice(eqPos + 1),
-            domain: '.facebook.com',
-            path: '/'
-          });
+    let avatarCdnUrl = null;
+    for (const pattern of imgPatterns) {
+      let match;
+      while ((match = pattern.exec(html)) !== null) {
+        let url = match[1].replace(/&amp;/g, '&');
+        // Bỏ qua ảnh mặc định / icon nhỏ / emoji
+        if (url.includes('static') || url.includes('rsrc.php') || url.includes('emoji')) continue;
+        // Ưu tiên ảnh profile (chứa t39.30808-1 hoặc t1.30497-1)
+        if (url.includes('/t39.30808-1/') || url.includes('/t1.30497-1/') || url.includes('/t39.30808-6/')) {
+          avatarCdnUrl = url;
+          break;
+        }
+        // Nếu chưa có, lưu URL fbcdn đầu tiên tìm được
+        if (!avatarCdnUrl && url.includes('fbcdn.net')) {
+          avatarCdnUrl = url;
         }
       }
-      await context.addCookies(playwrightCookies);
+      if (avatarCdnUrl && (avatarCdnUrl.includes('/t39.30808-1/') || avatarCdnUrl.includes('/t1.30497-1/'))) break;
     }
 
-    // Điều hướng vào trang facebook
-    await page.goto('https://www.facebook.com/', { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
-    await page.waitForTimeout(2000);
+    if (avatarCdnUrl) {
+      console.log(`[Avatar-mbasic] uid=${uid} tìm thấy URL: ${avatarCdnUrl.substring(0, 80)}...`);
+      // Download bytes từ CDN (fbcdn.net URLs thường public, không cần cookie)
+      const imgRes = await axios.get(avatarCdnUrl, {
+        responseType: 'arraybuffer',
+        timeout: 8000,
+        maxRedirects: 5
+      });
+      const ct = imgRes.headers['content-type'] || 'image/jpeg';
+      if (imgRes.data && imgRes.data.byteLength > 500 && ct.includes('image')) {
+        const result = {
+          bytes: Buffer.from(imgRes.data),
+          contentType: ct,
+          expiresAt: Date.now() + 2 * 60 * 60 * 1000
+        };
+        memoryAvatarCache[uid] = result;
+        console.log(`✅ [Avatar-mbasic] uid=${uid} OK (${result.bytes.length} bytes, ${ct})`);
+        return result;
+      }
+    } else {
+      console.log(`[Avatar-mbasic] uid=${uid} không tìm thấy URL ảnh trong HTML mbasic`);
+    }
+  } catch (mbasicErr) {
+    console.error(`❌ [Avatar-mbasic] uid=${uid} lỗi:`, mbasicErr.message);
+  }
 
-    // Danh sách selectors ảnh đại diện trên giao diện chính hoặc menu góc trên
+  // ─── Phương án 2: Scrape facebook.com chính (nặng hơn nhưng đầy đủ) ──────
+  try {
+    console.log(`[Avatar-Homepage] uid=${uid} đang scrape facebook.com homepage...`);
+    const fbRes = await axios.get('https://www.facebook.com/', {
+      headers: {
+        ...commonHeaders,
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+      },
+      timeout: 10000,
+      maxRedirects: 5
+    });
+    const html = typeof fbRes.data === 'string' ? fbRes.data : '';
+
+    // Trong HTML Facebook chính, ảnh avatar thường xuất hiện với pattern:
+    // "profilePicLarge":{"uri":"https://..."} hoặc "profile_picture":{"uri":"..."}
+    const jsonPatterns = [
+      /"profilePicLarge"\s*:\s*\{\s*"uri"\s*:\s*"([^"]+)"/,
+      /"profilePicMedium"\s*:\s*\{\s*"uri"\s*:\s*"([^"]+)"/,
+      /"profilePic(?:ture)?"\s*:\s*\{\s*"uri"\s*:\s*"([^"]+)"/,
+      /"profile_picture"\s*:\s*\{\s*"uri"\s*:\s*"([^"]+)"/,
+    ];
+
+    let avatarUrl = null;
+    for (const pattern of jsonPatterns) {
+      const match = html.match(pattern);
+      if (match) {
+        avatarUrl = match[1].replace(/\\\//g, '/');
+        if (avatarUrl.includes('fbcdn.net') && !avatarUrl.includes('176159830277856')) {
+          break;
+        }
+        avatarUrl = null;
+      }
+    }
+
+    if (avatarUrl) {
+      console.log(`[Avatar-Homepage] uid=${uid} tìm thấy URL: ${avatarUrl.substring(0, 80)}...`);
+      const imgRes = await axios.get(avatarUrl, {
+        responseType: 'arraybuffer',
+        timeout: 8000,
+        maxRedirects: 5
+      });
+      const ct = imgRes.headers['content-type'] || 'image/jpeg';
+      if (imgRes.data && imgRes.data.byteLength > 500 && ct.includes('image')) {
+        const result = {
+          bytes: Buffer.from(imgRes.data),
+          contentType: ct,
+          expiresAt: Date.now() + 2 * 60 * 60 * 1000
+        };
+        memoryAvatarCache[uid] = result;
+        console.log(`✅ [Avatar-Homepage] uid=${uid} OK (${result.bytes.length} bytes)`);
+        return result;
+      }
+    } else {
+      console.log(`[Avatar-Homepage] uid=${uid} không tìm thấy URL ảnh trong HTML`);
+    }
+  } catch (homeErr) {
+    console.error(`❌ [Avatar-Homepage] uid=${uid} lỗi:`, homeErr.message);
+  }
+
+  // ─── Phương án 3: Graph API redirect (chỉ dùng nếu ảnh > 5KB, bỏ ảnh mặc định) ──
+  try {
+    const graphUrl = `https://graph.facebook.com/${uid}/picture?type=large&width=200&height=200`;
+    const imgRes = await axios.get(graphUrl, {
+      responseType: 'arraybuffer',
+      timeout: 10000,
+      maxRedirects: 5
+    });
+    const ct = imgRes.headers['content-type'] || 'image/jpeg';
+    // Ảnh silhouette mặc định của Facebook chỉ ~1876 bytes
+    // Ảnh thật thường > 5KB
+    if (imgRes.data && imgRes.data.byteLength > 5000 && ct.includes('image')) {
+      const result = {
+        bytes: Buffer.from(imgRes.data),
+        contentType: ct,
+        expiresAt: Date.now() + 2 * 60 * 60 * 1000
+      };
+      memoryAvatarCache[uid] = result;
+      console.log(`✅ [Avatar-Graph] uid=${uid} OK (${result.bytes.length} bytes)`);
+      return result;
+    } else {
+      console.log(`[Avatar-Graph] uid=${uid} ảnh mặc định/nhỏ (${imgRes.data?.byteLength} bytes), bỏ qua`);
+    }
+  } catch (graphErr) {
+    console.error(`❌ [Avatar-Graph] uid=${uid} lỗi:`, graphErr.message);
+  }
+
+  // ─── Phương án 4: Playwright Scraper (Độ tin cậy cao nhất khi bị chặn HTTP) ──
+  let browser = null;
+  try {
+    console.log(`[Avatar-Playwright] uid=${uid} đang khởi động browser để scrape...`);
+    browser = await chromium.launch({
+      headless: true,
+      args: [
+        '--disable-gpu', '--mute-audio', '--no-sandbox',
+        '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled'
+      ]
+    });
+    const context = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+    });
+
+    // Inject cookie của đúng tài khoản
+    const playwrightCookies = [];
+    for (const part of cookie.split(';').map(p => p.trim())) {
+      const eqPos = part.indexOf('=');
+      if (eqPos > 0) {
+        playwrightCookies.push({
+          name: part.slice(0, eqPos), value: part.slice(eqPos + 1),
+          domain: '.facebook.com', path: '/'
+        });
+      }
+    }
+    await context.addCookies(playwrightCookies);
+    const page = await context.newPage();
+
+    let avatarUrl = null;
+
+    // Intercept network để bắt URL ảnh avatar thực tế từ phản hồi mạng
+    const avatarUrlPromise = new Promise((resolve) => {
+      page.on('response', async (response) => {
+        const url = response.url();
+        if (
+          url.includes('fbcdn.net') &&
+          (url.includes('/t39.30808-1/') || url.includes('/t1.30497-1/')) &&
+          !avatarUrl
+        ) {
+          try {
+            const body = await response.body();
+            const ct = response.headers()['content-type'] || 'image/jpeg';
+            if (body && body.length > 500 && ct.includes('image')) {
+              avatarUrl = url;
+              resolve({ bytes: body, contentType: ct });
+            }
+          } catch {}
+        }
+      });
+      // Timeout sau 15 giây
+      setTimeout(() => resolve(null), 15000);
+    });
+
+    await page.goto('https://www.facebook.com/', { waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => {});
+    await page.waitForTimeout(3000);
+
+    const intercepted = await avatarUrlPromise;
+    if (intercepted) {
+      const result = {
+        bytes: Buffer.from(intercepted.bytes),
+        contentType: intercepted.contentType,
+        expiresAt: Date.now() + 2 * 60 * 60 * 1000
+      };
+      memoryAvatarCache[uid] = result;
+      console.log(`✅ [Avatar-Playwright-Intercept] uid=${uid} OK (${result.bytes.length} bytes)`);
+      return result;
+    }
+
+    // Nếu không bắt được qua network intercept, thử định vị bằng selectors
     const selectors = [
       'div[role="banner"] div[role="button"] img[src*="fbcdn"]',
       'div[aria-label*="Trang cá nhân"] img[src*="fbcdn"]',
       'div[aria-label*="Your profile"] img[src*="fbcdn"]',
-      'a[href*="/profile.php"] img[src*="fbcdn"]',
       'img[src*="fbcdn.net/v/t39.30808-1"]'
     ];
-
-    let avatarUrl = null;
     for (const selector of selectors) {
       const el = page.locator(selector).first();
       if (await el.isVisible().catch(() => false)) {
@@ -599,49 +804,37 @@ async function ensureAvatarCached(cookie, uid) {
         }
       }
     }
-
-    // Nếu không tìm thấy, đi tới trang cá nhân /me
-    if (!avatarUrl) {
-      await page.goto('https://www.facebook.com/me', { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
-      await page.waitForTimeout(2000);
-
-      const profileSelectors = [
-        'a[role="link"] img[src*="fbcdn.net"]',
-        'svg[role="img"] image',
-        'g image',
-        'img[src*="fbcdn.net"]'
-      ];
-
-      for (const selector of profileSelectors) {
-        const locators = page.locator(selector);
-        const count = await locators.count().catch(() => 0);
-        for (let i = 0; i < count; i++) {
-          const el = locators.nth(i);
-          const src = await el.getAttribute('src').catch(() => null) || await el.getAttribute('xlink:href').catch(() => null);
-          if (src && src.includes('fbcdn.net') && !src.includes('176159830277856')) {
-            avatarUrl = src;
-            break;
-          }
-        }
-        if (avatarUrl) break;
+    if (avatarUrl) {
+      // Download bytes với cookie header
+      const imgRes = await axios.get(avatarUrl, {
+        headers: { 'Cookie': cookie },
+        responseType: 'arraybuffer',
+        timeout: 8000
+      });
+      const ct = imgRes.headers['content-type'] || 'image/jpeg';
+      if (imgRes.data && imgRes.data.byteLength > 500) {
+        const result = {
+          bytes: Buffer.from(imgRes.data),
+          contentType: ct,
+          expiresAt: Date.now() + 2 * 60 * 60 * 1000
+        };
+        memoryAvatarCache[uid] = result;
+        console.log(`✅ [Avatar-Playwright-Selector] uid=${uid} OK (${result.bytes.length} bytes)`);
+        return result;
       }
     }
 
-    if (avatarUrl) {
-      // Lưu trữ URL ảnh đại diện vào bộ nhớ đệm (thời hạn 2 giờ để phòng trường hợp link CDN hết hạn)
-      memoryAvatarCache[uid] = {
-        url: avatarUrl,
-        expiresAt: Date.now() + 2 * 60 * 60 * 1000 // 2 giờ
-      };
-      return true;
-    }
+    console.warn(`⚠️ [Avatar-Playwright] uid=${uid} không tìm thấy ảnh avatar.`);
   } catch (err) {
-    console.error('❌ [Avatar-Scraper] Lỗi khi lấy URL ảnh đại diện:', err.message);
+    console.error(`❌ [Avatar-Playwright] uid=${uid} lỗi:`, err.message);
   } finally {
-    if (context) await context.close().catch(() => {});
+    if (browser) await browser.close().catch(() => {});
   }
-  return false;
+
+  console.warn(`⚠️ [Avatar] uid=${uid} không lấy được ảnh đại diện bằng bất kỳ phương án nào.`);
+  return null;
 }
+
 
 async function diagnoseCookies(req, res) {
   try {

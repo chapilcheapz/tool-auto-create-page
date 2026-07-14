@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Sparkles, Menu, ListFilter, AlertCircle, RefreshCw, Sun, Moon } from 'lucide-react';
 import * as api from './utils/api';
 import LoginView from './components/LoginView';
@@ -27,6 +27,10 @@ export default function App() {
   // Settings & Cookie Configuration
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [cookie, setCookie] = useState('');
+  // Timestamp chỉ thay đổi khi uid đổi, tránh re-request avatar mỗi lần render
+  const [avatarTs, setAvatarTs] = useState(Date.now());
+  const prevUidRef = useRef(null);
+
   
   // Page list and details states
   const [pages, setPages] = useState([]);
@@ -173,34 +177,55 @@ export default function App() {
               {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
             </button>
 
-            {/* User Profile Avatar */}
+            {/* User Profile Avatars */}
             {(() => {
-              const getFbUid = (cookieString) => {
-                if (!cookieString) return null;
-                const match = cookieString.match(/c_user=(\d+)/);
-                return match ? match[1] : null;
+              const getFbUids = (cookieString) => {
+                if (!cookieString) return [];
+                const lines = cookieString.split('\n').map(c => c.trim()).filter(Boolean);
+                const uids = [];
+                for (const line of lines) {
+                  const match = line.match(/c_user=(\d+)/);
+                  if (match && match[1]) {
+                    uids.push(match[1]);
+                  }
+                }
+                return [...new Set(uids)];
               };
-              const fbUid = getFbUid(cookie);
+              const fbUids = getFbUids(cookie);
               
-              if (!fbUid) return null; // Ẩn hoàn toàn nếu chưa có tài khoản Facebook
+              // Reset avatarTs khi danh sách các uid thay đổi để force reload đúng avatar
+              const uidsJoined = fbUids.join(',');
+              if (uidsJoined && uidsJoined !== prevUidRef.current) {
+                prevUidRef.current = uidsJoined;
+                // Dùng setTimeout để tránh setState trong render
+                setTimeout(() => setAvatarTs(Date.now()), 0);
+              }
+              
+              if (fbUids.length === 0) return null; // Ẩn hoàn toàn nếu chưa có tài khoản Facebook
               
               return (
-                <div 
-                  className="w-10 h-10 rounded-full bg-[var(--active-menu-bg)] border-2 border-[var(--active-menu-border)] flex items-center justify-center overflow-hidden shrink-0 transition-transform duration-200 hover:scale-105 shadow-sm"
-                  title={`UID Facebook: ${fbUid}`}
-                >
-                  <img 
-                    src={`/api/config/fb-avatar?t=${Date.now()}`} 
-                    alt="FB Profile" 
-                    className="w-full h-full object-cover"
-                    onError={(e) => {
-                      e.target.onerror = null;
-                      e.target.src = `https://api.dicebear.com/7.x/initials/svg?seed=${fbUid}`;
-                    }}
-                  />
+                <div className="flex items-center -space-x-3 hover:-space-x-1 transition-all duration-300">
+                  {fbUids.map((uid) => (
+                    <div 
+                      key={uid}
+                      className="w-10 h-10 rounded-full bg-[var(--active-menu-bg)] border-2 border-[var(--active-menu-border)] flex items-center justify-center overflow-hidden shrink-0 transition-transform duration-200 hover:scale-110 hover:z-10 shadow-md"
+                      title={`UID Facebook: ${uid}`}
+                    >
+                      <img 
+                        src={`/api/config/fb-avatar?uid=${uid}&t=${avatarTs}`} 
+                        alt={`FB Profile ${uid}`} 
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          e.target.onerror = null;
+                          e.target.src = `https://api.dicebear.com/7.x/initials/svg?seed=${uid}`;
+                        }}
+                      />
+                    </div>
+                  ))}
                 </div>
               );
             })()}
+
 
             {/* Ready Status Badge */}
             {(() => {
