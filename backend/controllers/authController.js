@@ -131,6 +131,7 @@ async function register(req, res) {
 
 async function refresh(req, res) {
   const { refreshToken } = req.body;
+  console.log('[JWT-Refresh-Debug] Nhận yêu cầu refresh. Token length:', refreshToken ? refreshToken.length : 0);
   if (!refreshToken) {
     return res.status(400).json({ success: false, error: 'Thiếu Refresh Token.' });
   }
@@ -138,27 +139,37 @@ async function refresh(req, res) {
   try {
     // Decode without verification first to extract payload (username)
     const decodedPayload = jwt.decode(refreshToken);
+    console.log('[JWT-Refresh-Debug] Decoded payload:', decodedPayload);
     if (!decodedPayload || !decodedPayload.username) {
       return res.status(401).json({ success: false, error: 'Refresh Token không hợp lệ.' });
     }
 
     const username = decodedPayload.username;
     
-    // Fetch user from DB to get current password hash for verifying signature
-    const user = await userService.findUserByUsername(username);
+    // Fetch user from DB to get current password hash for verifying signature (check both username and email)
+    let user = await userService.findUserByUsername(username);
+    if (!user) {
+      user = await userService.findUserByEmail(username);
+    }
+    console.log('[JWT-Refresh-Debug] Tìm thấy user từ DB:', user ? { id: user.id, username: user.username } : 'null');
     if (!user) {
       return res.status(401).json({ success: false, error: 'Người dùng không tồn tại.' });
     }
 
     // Verify signature using JWT_SECRET + user.password (Security seed)
     const refreshSecret = getJwtSecret() + user.password;
+    console.log('[JWT-Refresh-Debug] Đang verify chữ ký...');
     
     let decoded;
     try {
       decoded = jwt.verify(refreshToken, refreshSecret);
+      console.log('[JWT-Refresh-Debug] Verify chữ ký THÀNH CÔNG!');
     } catch (err) {
+      console.error('[JWT-Refresh-Debug] Lỗi verify refresh token:', err.message, err.stack);
       return res.status(401).json({ success: false, error: 'Phiên đăng nhập đã hết hạn hoặc mật khẩu đã thay đổi. Vui lòng đăng nhập lại.' });
     }
+
+
 
     // Issue new Access Token
     const expiresIn = process.env.JWT_EXPIRES_IN || '15m';
