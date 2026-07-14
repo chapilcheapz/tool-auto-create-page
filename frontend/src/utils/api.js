@@ -7,7 +7,9 @@ let isRefreshing = null;
 async function performRefresh() {
   const refreshToken = localStorage.getItem('refresh_token');
   if (!refreshToken) {
-    throw new Error('Không tìm thấy Refresh Token');
+    const err = new Error('Không tìm thấy Refresh Token');
+    err.status = 401;
+    throw err;
   }
 
   const response = await fetch('/api/auth/refresh', {
@@ -17,7 +19,9 @@ async function performRefresh() {
   });
 
   if (!response.ok) {
-    throw new Error('Gia hạn token thất bại');
+    const err = new Error('Gia hạn token thất bại');
+    err.status = response.status;
+    throw err;
   }
 
   const result = await response.json();
@@ -26,7 +30,9 @@ async function performRefresh() {
     localStorage.setItem('refresh_token', result.refreshToken);
     return result.token;
   } else {
-    throw new Error('Phản hồi gia hạn không hợp lệ');
+    const err = new Error('Phản hồi gia hạn không hợp lệ');
+    err.status = 401;
+    throw err;
   }
 }
 
@@ -53,10 +59,15 @@ async function authFetch(url, options = {}) {
       
     } catch (err) {
       isRefreshing = null;
-      localStorage.removeItem('jwt_token');
-      localStorage.removeItem('refresh_token');
-      window.dispatchEvent(new Event('auth-expired'));
-      throw new Error('Phiên làm việc hết hạn. Vui lòng đăng nhập lại.');
+      // Chỉ đăng xuất nếu là lỗi xác thực thực tế (401 hoặc 403)
+      if (err.status === 401 || err.status === 403) {
+        localStorage.removeItem('jwt_token');
+        localStorage.removeItem('refresh_token');
+        window.dispatchEvent(new Event('auth-expired'));
+        throw new Error('Phiên làm việc hết hạn. Vui lòng đăng nhập lại.');
+      }
+      // Đối với lỗi mạng hoặc lỗi máy chủ 500, giữ lại phiên đăng nhập
+      throw new Error('Lỗi kết nối máy chủ. Vui lòng kiểm tra lại đường truyền.');
     }
   }
   
@@ -69,6 +80,7 @@ async function authFetch(url, options = {}) {
   
   return response;
 }
+
 
 export async function login(username, password) {
   const response = await fetch('/api/auth/login', {
