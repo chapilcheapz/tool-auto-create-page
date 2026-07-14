@@ -49,80 +49,118 @@ function findPagesRecursively(obj, list) {
  * Fetch list of Pages owned by the user
  */
 async function getPages(cookie) {
-  const tokens = await extractTokens(cookie);
-  if (!tokens.success) {
-    throw new Error(`Không thể trích xuât token: ${tokens.error}`);
+  const cookieList = cookie.split('\n').map(c => c.trim()).filter(Boolean);
+  if (cookieList.length === 0) {
+    throw new Error('Không có cookie hợp lệ.');
   }
 
-  const config = {
-    cookie,
-    fb_dtsg: tokens.fb_dtsg,
-    __user: tokens.__user,
-    lsd: tokens.lsd,
-    jazoest: tokens.jazoest,
-    __hsi: tokens.__hsi || '',
-    __rev: tokens.__rev || '',
-    __dyn: '',
-    __csr: '',
-  };
+  // Hàm phụ lấy trang cho một cookie đơn lẻ
+  const getPagesForSingleCookie = async (singleCookie) => {
+    const tokens = await extractTokens(singleCookie);
+    if (!tokens.success) {
+      throw new Error(`Không thể trích xuất token: ${tokens.error}`);
+    }
 
-  const headers = buildHeaders(config);
-  headers['x-fb-friendly-name'] = 'PagesCometLaunchpointUnifiedQueryPagesListRedesignedQuery';
-
-  const executeRequest = async (docIdValue) => {
-    const params = {
-      av: config.__user,
-      ...buildCommonParams(config),
-      __crn: 'comet.fbweb.CometHomeRoute',
-      fb_api_caller_class: 'RelayModern',
-      fb_api_req_friendly_name: 'PagesCometLaunchpointUnifiedQueryPagesListRedesignedQuery',
-      server_timestamps: 'true',
-      variables: JSON.stringify({ scale: 2 }),
-      doc_id: docIdValue
+    const config = {
+      cookie: singleCookie,
+      fb_dtsg: tokens.fb_dtsg,
+      __user: tokens.__user,
+      lsd: tokens.lsd,
+      jazoest: tokens.jazoest,
+      __hsi: tokens.__hsi || '',
+      __rev: tokens.__rev || '',
+      __dyn: '',
+      __csr: '',
     };
 
-    return axios.post(
-      'https://www.facebook.com/api/graphql/',
-      querystring.stringify(params),
-      { headers }
-    );
+    const headers = buildHeaders(config);
+    headers['x-fb-friendly-name'] = 'PagesCometLaunchpointUnifiedQueryPagesListRedesignedQuery';
+
+    const executeRequest = async (docIdValue) => {
+      const params = {
+        av: config.__user,
+        ...buildCommonParams(config),
+        __crn: 'comet.fbweb.CometHomeRoute',
+        fb_api_caller_class: 'RelayModern',
+        fb_api_req_friendly_name: 'PagesCometLaunchpointUnifiedQueryPagesListRedesignedQuery',
+        server_timestamps: 'true',
+        variables: JSON.stringify({ scale: 2 }),
+        doc_id: docIdValue
+      };
+
+      return axios.post(
+        'https://www.facebook.com/api/graphql/',
+        querystring.stringify(params),
+        { headers }
+      );
+    };
+
+    let docId = getDocId('PagesCometLaunchpointUnifiedQueryPagesListRedesignedQuery');
+    let response;
+    try {
+      response = await executeRequest(docId);
+    } catch (error) {
+      throw new Error(`Lỗi kết nối Facebook: ${error.message}`);
+    }
+
+    let respData = response.data;
+    let isDocIdError = typeof respData === 'string' 
+      ? respData.includes('was not found') 
+      : JSON.stringify(respData).includes('was not found');
+
+    if (isDocIdError) {
+      console.log(`[Self-Healing] Phát hiện doc_id lấy danh sách page cũ (${docId}) đã hết hạn. Đang tự động dò tìm doc_id mới...`);
+      const newDocId = await autoDiscoverDocId(singleCookie, 'PagesCometLaunchpointUnifiedQueryPagesListRedesignedQuery');
+      if (newDocId) {
+        console.log(`[Self-Healing] Đã lấy được doc_id mới (${newDocId}). Tiến hành gửi lại yêu cầu lấy danh sách...`);
+        try {
+          response = await executeRequest(newDocId);
+          respData = response.data;
+        } catch (error) {
+          throw new Error(`Lỗi kết nối Facebook khi gọi lại: ${error.message}`);
+        }
+      }
+    }
+
+    const responseText = typeof respData === 'string' ? respData : JSON.stringify(respData);
+    if (responseText.includes('error":1357001') || responseText.includes('errorSummary') || responseText.includes('Vui lòng đăng nhập')) {
+      throw new Error('Cookie hết hạn hoặc không hợp lệ (Facebook yêu cầu đăng nhập lại).');
+    }
+
+    const parsedPages = parsePagesFromGraphQL(respData);
+    // Gắn thuộc tính ownerCookie cho mỗi page để sau này dùng đúng cookie của tài khoản đó khi thả cảm xúc
+    for (const page of parsedPages) {
+      page.ownerCookie = singleCookie;
+    }
+    return parsedPages;
   };
 
-  let docId = getDocId('PagesCometLaunchpointUnifiedQueryPagesListRedesignedQuery');
-  let response;
-  try {
-    response = await executeRequest(docId);
-  } catch (error) {
-    throw new Error(`Lỗi kết nối Facebook: ${error.message}`);
-  }
+  const allPages = [];
+  const seenIds = new Set();
 
-  let respData = response.data;
-  let isDocIdError = typeof respData === 'string' 
-    ? respData.includes('was not found') 
-    : JSON.stringify(respData).includes('was not found');
-
-  if (isDocIdError) {
-    console.log(`[Self-Healing] Phát hiện doc_id lấy danh sách page cũ (${docId}) đã hết hạn. Đang tự động dò tìm doc_id mới...`);
-    const newDocId = await autoDiscoverDocId(cookie, 'PagesCometLaunchpointUnifiedQueryPagesListRedesignedQuery');
-    if (newDocId) {
-      console.log(`[Self-Healing] Đã lấy được doc_id mới (${newDocId}). Tiến hành gửi lại yêu cầu lấy danh sách...`);
-      try {
-        response = await executeRequest(newDocId);
-        respData = response.data;
-      } catch (error) {
-        throw new Error(`Lỗi kết nối Facebook khi gọi lại: ${error.message}`);
+  for (const singleCookie of cookieList) {
+    try {
+      const pages = await getPagesForSingleCookie(singleCookie);
+      for (const page of pages) {
+        if (!seenIds.has(page.id)) {
+          seenIds.add(page.id);
+          allPages.push(page);
+        }
       }
+    } catch (err) {
+      console.error(`⚠️ [facebookService.getPages] Bỏ qua cookie lỗi của tài khoản Facebook:`, err.message);
     }
   }
 
-  return parsePagesFromGraphQL(respData);
+  return allPages;
 }
 
 /**
  * Create a new Facebook Page
  */
 async function createPage(cookie, customName, customBio, category) {
-  const tokens = await extractTokens(cookie);
+  const primaryCookie = cookie.split('\n').map(c => c.trim()).filter(Boolean)[0] || cookie;
+  const tokens = await extractTokens(primaryCookie);
   if (!tokens.success) {
     throw new Error(`Lỗi token: ${tokens.error}`);
   }
@@ -132,7 +170,7 @@ async function createPage(cookie, customName, customBio, category) {
   const pageCategory = category && category.trim() ? category.trim() : '2347428775505624';
 
   const config = {
-    cookie,
+    cookie: primaryCookie,
     fb_dtsg: tokens.fb_dtsg,
     __user: tokens.__user,
     lsd: tokens.lsd,
@@ -241,6 +279,7 @@ async function createPage(cookie, customName, customBio, category) {
  * Translate Reel/Video ID to story feedback ID by parsing HTML
  */
 async function getFeedbackIdForUrl(postUrl, postId, cookie) {
+  const primaryCookie = cookie.split('\n').map(c => c.trim()).filter(Boolean)[0] || cookie;
   if (!postUrl.includes('/reel/') && !postUrl.includes('/reels/') && !postUrl.includes('/videos/') && !postUrl.includes('watch')) {
     return Buffer.from(`feedback:${postId}`).toString('base64');
   }
@@ -254,7 +293,7 @@ async function getFeedbackIdForUrl(postUrl, postId, cookie) {
     const context = await browser.newContext();
 
     // Set cookies for facebook
-    const cookieParts = cookie.split(';').map(part => part.trim());
+    const cookieParts = primaryCookie.split(';').map(part => part.trim());
     const playwrightCookies = [];
     for (const part of cookieParts) {
       const eqPos = part.indexOf('=');

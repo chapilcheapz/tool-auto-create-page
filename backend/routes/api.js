@@ -19,6 +19,7 @@ router.use(authMiddleware);
 
 // Config routes
 router.get('/config', configController.getConfig);
+router.get('/config/diagnose-cookies', configController.diagnoseCookies);
 router.post('/config', configController.saveConfig);
 router.post('/config/fb-login', configController.fbLogin);
 router.get('/config/fb-verification-status', configController.getVerificationStatus);

@@ -48,31 +48,16 @@ async function bulkReact(req, res) {
   }
 
   try {
+    // Lấy cookie của tài khoản đầu tiên để gọi tác vụ chung
+    const primaryCookie = cookie.split('\n').map(c => c.trim()).filter(Boolean)[0] || cookie;
+
     // 1. Lấy đúng feedback_id (xử lý link Reel/Video)
-    const feedbackId = await facebookService.getFeedbackIdForUrl(postUrl, postId, cookie);
+    const feedbackId = await facebookService.getFeedbackIdForUrl(postUrl, postId, primaryCookie);
 
-    // 2. Trích xuất token bảo mật
-    const tokens = await extractTokens(cookie);
-    if (!tokens.success) {
-      return res.status(500).json({ success: false, error: `Lỗi token: ${tokens.error}` });
-    }
-
-    const config = {
-      cookie,
-      fb_dtsg: tokens.fb_dtsg,
-      __user: tokens.__user,
-      lsd: tokens.lsd,
-      jazoest: tokens.jazoest,
-      __hsi: tokens.__hsi || '',
-      __rev: tokens.__rev || '',
-      __dyn: '',
-      __csr: '',
-    };
-
-    // 3. Lấy danh sách Page
+    // 2. Lấy danh sách tất cả các Page từ tất cả các Cookie
     let pages = await facebookService.getPages(cookie);
     if (pages.length === 0) {
-      return res.status(404).json({ success: false, error: 'Tài khoản không sở hữu Page nào!' });
+      return res.status(404).json({ success: false, error: 'Không sở hữu Page nào từ các tài khoản đã đăng nhập!' });
     }
 
     // Giới hạn số lượng page chạy nếu người dùng nhập
@@ -84,10 +69,36 @@ async function bulkReact(req, res) {
     const results = [];
     const targetReaction = reactionType || '1635855486666999'; // Default Like
 
-    // 4. Thả cảm xúc tuần tự cho từng Page
+    // 3. Thả cảm xúc tuần tự cho từng Page sử dụng đúng Cookie của tài khoản sở hữu
     for (let i = 0; i < pages.length; i++) {
       const page = pages[i];
+      const pageCookie = page.ownerCookie || primaryCookie;
+      
       try {
+        // Trích xuất token bảo mật cho tài khoản sở hữu Page này
+        const tokens = await extractTokens(pageCookie);
+        if (!tokens.success) {
+          results.push({
+            pageId: page.id,
+            name: page.name,
+            success: false,
+            error: `Lỗi token của tài khoản sở hữu page: ${tokens.error}`
+          });
+          continue;
+        }
+
+        const config = {
+          cookie: pageCookie,
+          fb_dtsg: tokens.fb_dtsg,
+          __user: tokens.__user,
+          lsd: tokens.lsd,
+          jazoest: tokens.jazoest,
+          __hsi: tokens.__hsi || '',
+          __rev: tokens.__rev || '',
+          __dyn: '',
+          __csr: '',
+        };
+
         const outcome = await facebookService.reactPost(config, page.id, feedbackId, targetReaction, i + 1);
         if (outcome.success) {
           results.push({ pageId: page.id, name: page.name, success: true });

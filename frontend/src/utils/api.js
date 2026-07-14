@@ -107,6 +107,11 @@ export async function fetchConfig() {
   return response.json();
 }
 
+export async function diagnoseCookies() {
+  const response = await authFetch('/api/config/diagnose-cookies');
+  return response.json();
+}
+
 export async function saveConfig(cookie) {
   const response = await authFetch('/api/config', {
     method: 'POST',
