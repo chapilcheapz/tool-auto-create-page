@@ -85,7 +85,12 @@ export default function RightSidebar({
                 >
                   <div className="w-8 h-8 rounded-full bg-purple-500/10 text-purple-400 font-bold flex items-center justify-center text-xs overflow-hidden shrink-0">
                     {page.avatar ? (
-                      <img src={page.avatar} alt={page.name} className="w-full h-full object-cover" />
+                      <img 
+                        src={page.avatar} 
+                        alt={page.name} 
+                        className="w-full h-full object-cover" 
+                        referrerPolicy="no-referrer"
+                      />
                     ) : (
                       page.name ? page.name.charAt(0).toUpperCase() : 'P'
                     )}
