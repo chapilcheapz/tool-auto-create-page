@@ -250,7 +250,7 @@ async function waitForFacebookAuthentication(page, context) {
         await page.screenshot({ path: screenshotPath });
         
         // Cập nhật URL có biến t=now để frontend bỏ qua cache trình duyệt và load ảnh mới
-        verificationState.screenshotPath = '/checkpoint.png?t=' + now;
+        verificationState.screenshotPath = screenshotPath;
         verificationState.pending = true;
         verificationState._lastSs = now;
       } catch (ssErr) {
