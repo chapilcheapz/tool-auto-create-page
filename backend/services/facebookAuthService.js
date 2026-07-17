@@ -242,6 +242,22 @@ async function waitForFacebookAuthentication(page, context) {
       console.log(`[FB-Login] (${elapsed}s) Đang chờ xác minh tại: ${currentUrl.pathname}`);
     }
 
+    // [LIVE VIEW]: Chụp ảnh màn hình liên tục mỗi 2 giây để frontend stream thành dạng "video"
+    if (now - (verificationState._lastSs || 0) > 2000) {
+      try {
+        // Lưu ảnh đè lên checkpoint.png liên tục
+        const screenshotPath = path.join(process.cwd(), 'frontend', 'public', 'checkpoint.png');
+        await page.screenshot({ path: screenshotPath });
+        
+        // Cập nhật URL có biến t=now để frontend bỏ qua cache trình duyệt và load ảnh mới
+        verificationState.screenshotPath = '/checkpoint.png?t=' + now;
+        verificationState.pending = true;
+        verificationState._lastSs = now;
+      } catch (ssErr) {
+        // Bỏ qua lỗi chụp ảnh nếu trang đang load hoặc bị đóng
+      }
+    }
+
     await page.waitForTimeout(1000);
   }
 
