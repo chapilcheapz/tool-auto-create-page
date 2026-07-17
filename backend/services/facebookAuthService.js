@@ -268,7 +268,7 @@ async function fbLoginService(username, password, twoFactorSecret) {
   try {
     console.log('[FB-Login] Đang khởi động trình duyệt...');
     context = await chromium.launchPersistentContext(profilePath, {
-      headless: true ,
+      headless: false ,
       ignoreDefaultArgs: ['--enable-automation'],
       args: [
         '--disable-gpu',
@@ -594,7 +594,7 @@ async function fetchAvatarBytes(cookie, uid) {
   try {
     console.log(`[Avatar-Playwright] uid=${uid} đang khởi động browser...`);
     browser = await chromium.launch({
-      headless: true,
+      headless: false,
       args: [
         '--disable-gpu', '--mute-audio', '--no-sandbox',
         '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled'
