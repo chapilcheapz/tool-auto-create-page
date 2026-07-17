@@ -167,7 +167,7 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
     }
 
     setFbLoginLoading(true);
-    showToast('Bắt đầu tiến trình đăng nhập Facebook giả lập...', 'success');
+    showToast('Bắt đầu tiến trình đăng nhập Facebook', 'success');
     startVerificationPolling();
 
     try {
@@ -180,14 +180,21 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
         body: JSON.stringify({ username, password, twofa })
       });
       const result = await response.json();
+      
 
       if (result.success) {
-        showToast(`Đăng nhập FB thành công! UID: ${result.c_user}`, 'success');
+        // Lấy UID (c_user) trực tiếp từ chuỗi cookie
+        const cUserMatch = result.cookie ? result.cookie.match(/c_user=(\d+)/) : null;
+        const uid = cUserMatch ? cUserMatch[1] : 'Không rõ';
+        
+        // console.log("Cookie string:", result.cookie);
+        showToast(`Đăng nhập FB thành công! UID: ${uid}`, 'success');
         setVerification({ pending: false, screenshotUrl: null });
         // reload config from server
         const configRes = await api.fetchConfig();
         if (configRes.success && configRes.cookie) {
-          setCookieVal(configRes.cookie);
+          const parts = configRes.cookie.split('\n').filter(c => c.trim() !== '');
+          setCookies(parts.length > 0 ? parts : ['']);
           onCookieChange(configRes.cookie);
         }
       } else {

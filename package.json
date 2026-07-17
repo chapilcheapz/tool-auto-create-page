@@ -12,18 +12,21 @@
     "dev:frontend": "npm run dev -w frontend",
     "dev": "concurrently --kill-others-on-fail \"npm run dev:backend\" \"npm run dev:frontend\"",
     "build:frontend": "npm run build -w frontend"
-
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.2",
-    "axios": "^1.7.0",
+    "axios": "^1.18.1",
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^17.4.2",
     "express": "^4.21.0",
+    "form-data": "^4.0.6",
+    "https-proxy-agent": "^9.1.0",
     "jsonwebtoken": "^9.0.3",
-    "playwright": "^1.61.1"
+    "playwright": "^1.61.1",
+    "playwright-extra": "^4.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
   },
   "devDependencies": {
     "concurrently": "^10.0.3"
