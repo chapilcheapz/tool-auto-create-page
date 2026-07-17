@@ -93,8 +93,8 @@ async function waitForFacebookAuthentication(page, context) {
         
         // Di chuyển chuột nhẹ và click
         await checkbox.hover();
-        await page.waitForTimeout(500);
-        await checkbox.click({ force: true });
+        await page.waitForTimeout(800 + Math.random() * 500); // Đợi ngẫu nhiên 0.8s - 1.3s
+        await checkbox.click(); // Bỏ force: true vì dễ bị Google bắt bài
         
         console.log('[FB-Login] Đã click checkbox reCAPTCHA. Đang chờ kết quả...');
         await page.waitForTimeout(4000);
@@ -124,6 +124,8 @@ async function waitForFacebookAuthentication(page, context) {
             // Click nút chuyển sang chế độ Audio (ID thường là #recaptcha-audio-button)
             const audioBtn = challengeFrame.locator('#recaptcha-audio-button').first();
             if (await audioBtn.isVisible().catch(() => false)) {
+              await audioBtn.hover();
+              await page.waitForTimeout(1000 + Math.random() * 1000); // Thêm độ trễ giống người
               await audioBtn.click();
               console.log('[FB-Login] Đã click chuyển sang Audio Challenge.');
               await page.waitForTimeout(3000);
@@ -284,15 +286,19 @@ async function fbLoginService(username, password, twoFactorSecret) {
   try {
     console.log('[FB-Login] Đang khởi động trình duyệt...');
     context = await chromium.launchPersistentContext(profilePath, {
-    headless: true ,
+      headless: true ,
       ignoreDefaultArgs: ['--enable-automation'],
       args: [
         '--disable-gpu',
         '--mute-audio',
         '--no-sandbox',
         '--disable-setuid-sandbox',
-        '--disable-blink-features=AutomationControlled'
+        '--disable-blink-features=AutomationControlled',
+        '--disable-infobars'
       ],
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      locale: 'vi-VN',
+      timezoneId: 'Asia/Ho_Chi_Minh',
       viewport: { width: 1280, height: 900 }
     });
 
