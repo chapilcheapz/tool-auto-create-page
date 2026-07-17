@@ -1,4 +1,6 @@
-const { chromium } = require('playwright');
+const { chromium } = require('playwright-extra');
+const stealth = require('puppeteer-extra-plugin-stealth')();
+chromium.use(stealth);
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
@@ -62,106 +64,6 @@ function generateTOTP(secret) {
   }
 }
 
-// Helper: Gọi API OpenRouter Vision Model (hỗ trợ đọc ảnh)
-async function askVisionModel(apiKey, model, imagePath, promptText) {
-  try {
-    const base64Image = fs.readFileSync(imagePath, { encoding: 'base64' });
-    const dataUrl = `data:image/png;base64,${base64Image}`;
-
-    const response = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
-      model: model || "google/gemini-2.0-flash-exp:free",
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "text", text: promptText },
-            { type: "image_url", image_url: { url: dataUrl } }
-          ]
-        }
-      ]
-    }, {
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://github.com/hoangquan/tool-auto-create-page',
-        'X-Title': 'Facebook Auto Page Creator'
-      },
-      timeout: 20000
-    });
-
-    return response.data?.choices?.[0]?.message?.content || '';
-  } catch (err) {
-    console.error('[AI-Captcha] Lỗi khi gọi OpenRouter:', err.response?.data || err.message);
-    return null;
-  }
-}
-
-// Helper: Tự động giải FunCaptcha (Arkose Labs) bằng AI
-async function autoSolveArkoseCaptcha(page, apiKey, model) {
-  console.log('[AI-Captcha] Bắt đầu tiến trình giải FunCaptcha tự động bằng AI...');
-  
-  const maxAttempts = 15;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const hasArkose = await page.locator('iframe[src*="arkoselabs"]').first().isVisible().catch(() => false);
-    if (!hasArkose) {
-      console.log('[AI-Captcha] Không còn phát hiện FunCaptcha. Hoàn tất!');
-      break;
-    }
-
-    const iframe = page.locator('iframe[src*="arkoselabs"]').first();
-    const box = await iframe.boundingBox().catch(() => null);
-    if (!box) {
-      console.log('[AI-Captcha] Không lấy được bounding box của iframe.');
-      await page.waitForTimeout(2000);
-      continue;
-    }
-
-    // Chụp ảnh iframe
-    const ssPath = path.join(process.cwd(), 'storage/captcha-temp.png');
-    try {
-      await iframe.screenshot({ path: ssPath });
-    } catch (e) {
-      console.log('[AI-Captcha] Không thể chụp ảnh iframe:', e.message);
-      break;
-    }
-
-    const promptText = `This is a FunCaptcha image (security puzzle).
-Please decide the next action:
-1. If you see a large blue 'Start' or 'Bắt đầu' button, reply with: 'START'.
-2. If the game has started, you will see a target object on the left, an object to rotate on the right, and left/right arrows.
-- If the object on the right is ALREADY aligned correctly according to the prompt (e.g. matched, stood upright, etc.), reply with: 'SUBMIT'.
-- If the object needs to be rotated, decide the direction: 'LEFT' or 'RIGHT'.
-Provide your answer in ONLY ONE word: 'START', 'LEFT', 'RIGHT', 'SUBMIT', or 'UNKNOWN'. Do not write any other explanation.`;
-
-    const decisionRaw = await askVisionModel(apiKey, model, ssPath, promptText);
-    if (!decisionRaw) {
-      console.log('[AI-Captcha] Không nhận được phản hồi từ AI.');
-      await page.waitForTimeout(3000);
-      continue;
-    }
-
-    const decision = decisionRaw.toUpperCase().trim();
-    console.log(`[AI-Captcha] [Lượt ${attempt}/${maxAttempts}] AI quyết định: ${decision}`);
-
-    if (decision.includes('START')) {
-      await page.mouse.click(box.x + box.width / 2, box.y + box.height * 0.6);
-      await page.waitForTimeout(3000);
-    } else if (decision.includes('LEFT')) {
-      await page.mouse.click(box.x + box.width * 0.44, box.y + box.height * 0.48);
-      await page.waitForTimeout(2000);
-    } else if (decision.includes('RIGHT')) {
-      await page.mouse.click(box.x + box.width * 0.56, box.y + box.height * 0.48);
-      await page.waitForTimeout(2000);
-    } else if (decision.includes('SUBMIT')) {
-      await page.mouse.click(box.x + box.width / 2, box.y + box.height * 0.82);
-      await page.waitForTimeout(4000);
-    } else {
-      console.log('[AI-Captcha] AI không xác định được hành động. Thử lại sau 2 giây.');
-      await page.waitForTimeout(2000);
-    }
-  }
-}
-
 async function waitForFacebookAuthentication(page, context) {
   const timeout = 300000;
   const startedAt = Date.now();
@@ -169,64 +71,132 @@ async function waitForFacebookAuthentication(page, context) {
   let captchaDetected = false;
   let lastLoggedPath = '';
   let lastLogTime = 0;
-  let waitingForCode = false;
 
   while (Date.now() - startedAt < timeout) {
-    // Tự động kiểm tra và giải FunCaptcha bằng OpenRouter Vision AI (nếu có key)
-    const hasArkose = await page.locator('iframe[src*="arkoselabs"]').first().isVisible().catch(() => false);
-    if (hasArkose) {
-      const apiKey = process.env.OPENROUTER_API_KEY;
-      const model = process.env.OPENROUTER_MODEL || "google/gemini-2.0-flash-exp:free";
-      if (apiKey) {
-        await autoSolveArkoseCaptcha(page, apiKey, model);
-        await page.waitForTimeout(3000);
-        continue;
-      }
-    }
+    // Tìm kiếm frame chứa reCAPTCHA Checkbox (đường dẫn chứa /anchor)
+    const anchorFrame = page.frames().find(f => 
+      f.url().includes('google.com/recaptcha/api2/anchor') || 
+      f.url().includes('google.com/recaptcha/enterprise/anchor')
+    );
+    const captchaVisible = !!anchorFrame;
 
-    const captchaVisible = await page
-      .locator('iframe#captcha-recaptcha')
-      .isVisible()
-      .catch(() => false);
-
-    if (captchaVisible && !captchaDetected) {
+    if (anchorFrame && !captchaDetected) {
       captchaDetected = true;
       console.log('[FB-Login] Phát hiện reCAPTCHA checkbox. Đang tự động click...');
 
-      let captchaClicked = false;
       try {
-        const captchaFrame = page.frameLocator('iframe#captcha-recaptcha');
-        const checkbox = captchaFrame.locator('.recaptcha-checkbox-border, #recaptcha-anchor, .recaptcha-checkbox');
-        await checkbox.first().click({ timeout: 5000 });
-        captchaClicked = true;
+        // Các selector phổ biến của ô tick reCAPTCHA
+        const checkboxSelector = '.recaptcha-checkbox-border, #recaptcha-anchor, .recaptcha-checkbox';
+        const checkbox = anchorFrame.locator(checkboxSelector).first();
+        
+        await checkbox.waitFor({ state: 'visible', timeout: 5000 });
+        
+        // Di chuyển chuột nhẹ và click
+        await checkbox.hover();
+        await page.waitForTimeout(500);
+        await checkbox.click({ force: true });
+        
         console.log('[FB-Login] Đã click checkbox reCAPTCHA. Đang chờ kết quả...');
-        await page.waitForTimeout(3000);
+        await page.waitForTimeout(4000);
 
-        const stillVisible = await page.locator('iframe#captcha-recaptcha').isVisible().catch(() => false);
-        if (!stillVisible) {
+        // Kiểm tra xem checkbox đã được tick chưa (có class recaptcha-checkbox-checked)
+        const isChecked = await anchorFrame.evaluate(() => {
+          const cb = document.querySelector('#recaptcha-anchor');
+          return cb ? cb.getAttribute('aria-checked') === 'true' : false;
+        }).catch(() => false);
+
+        if (isChecked) {
           console.log('[FB-Login] reCAPTCHA đã được giải thành công! Tiếp tục đăng nhập...');
           captchaDetected = false;
         } else {
-          console.log('[FB-Login] reCAPTCHA yêu cầu thêm xác minh. Đang chờ...');
+          console.log('[FB-Login] reCAPTCHA yêu cầu xác minh thêm. Đang chuyển sang Audio Challenge...');
+          
+          // Đợi 2 giây để Google load challenge bframe
+          await page.waitForTimeout(2000);
+
+          // Tìm challenge frame chứa hình ảnh/âm thanh (đường dẫn chứa /bframe)
+          const challengeFrame = page.frames().find(f => 
+            f.url().includes('google.com/recaptcha/api2/bframe') || 
+            f.url().includes('google.com/recaptcha/enterprise/bframe')
+          );
+
+          if (challengeFrame) {
+            // Click nút chuyển sang chế độ Audio (ID thường là #recaptcha-audio-button)
+            const audioBtn = challengeFrame.locator('#recaptcha-audio-button').first();
+            if (await audioBtn.isVisible().catch(() => false)) {
+              await audioBtn.click();
+              console.log('[FB-Login] Đã click chuyển sang Audio Challenge.');
+              await page.waitForTimeout(3000);
+
+              // Tìm nút tải xuống MP3
+              const downloadLink = challengeFrame.locator('.rc-audiochallenge-tdownload-link').first();
+              if (await downloadLink.isVisible().catch(() => false)) {
+                const audioUrl = await downloadLink.getAttribute('href');
+                console.log('[FB-Login] Tìm thấy link tải audio MP3:', audioUrl);
+                
+                // Click vào nút tải xuống (sẽ mở tab mới hoặc tải về tùy cấu hình browser)
+                console.log('[FB-Login] Đã click nút tải xuống audio.');
+                
+                try {
+                  // Gửi request lấy audio buffer
+                  const audioResponse = await axios.get(audioUrl, { responseType: 'arraybuffer' });
+                  const audioBuffer = Buffer.from(audioResponse.data);
+                  console.log('[FB-Login] Đã tải xong file MP3. Đang gửi lên wit.ai để giải mã...');
+
+                  const witAiToken = process.env.WIT_AI_TOKEN;
+                  if (!witAiToken) {
+                    console.log('[FB-Login] Lỗi: Chưa cấu hình WIT_AI_TOKEN trong file .env. Vui lòng thêm WIT_AI_TOKEN=your_token để sử dụng tính năng giải audio.');
+                    return;
+                  }
+                  
+                  const witResponse = await axios.post('https://api.wit.ai/speech', audioBuffer, {
+                    headers: {
+                      'Authorization': `Bearer ${witAiToken}`,
+                      'Content-Type': 'audio/mpeg3',
+                      'Accept': 'application/vnd.wit.20200513+json'
+                    }
+                  });
+
+                  // Trích xuất text (wit.ai có thể trả về NDJSON, lấy chunk cuối cùng hoặc trường 'text')
+                  let solvedText = '';
+                  if (typeof witResponse.data === 'string') {
+                    const lines = witResponse.data.split('\n').filter(l => l.trim() !== '');
+                    const lastLine = JSON.parse(lines[lines.length - 1]);
+                    solvedText = lastLine.text;
+                  } else {
+                    solvedText = witResponse.data.text;
+                  }
+
+                  if (solvedText && solvedText.trim() !== '') {
+                    console.log(`[FB-Login] Giải mã âm thanh thành công. Kết quả: "${solvedText}"`);
+                    
+                    // Điền kết quả vào ô input và nhấn Verify
+                    const audioInput = challengeFrame.locator('#audio-response').first();
+                    await audioInput.fill(solvedText.trim());
+                    await page.waitForTimeout(1000);
+                    
+                    const verifyBtn = challengeFrame.locator('#recaptcha-verify-button').first();
+                    await verifyBtn.click();
+                    console.log('[FB-Login] Đã submit kết quả audio.');
+                    await page.waitForTimeout(3000);
+                  } else {
+                     console.log('[FB-Login] Wit.ai không nhận diện được giọng nói trong file audio.');
+                  }
+                } catch (audioErr) {
+                  console.log('[FB-Login] Lỗi trong quá trình giải mã audio:', audioErr.message);
+                }
+              } else {
+                console.log('[FB-Login] Không tìm thấy nút tải xuống audio (có thể bị chặn IP hoặc bắt giải captcha hình ảnh bắt buộc).');
+              }
+            } else {
+              console.log('[FB-Login] Không tìm thấy nút chuyển đổi Audio (có thể giao diện đã thay đổi hoặc bị chặn tạm thời).');
+            }
+          } else {
+            console.log('[FB-Login] Không tìm thấy challenge bframe của reCAPTCHA.');
+          }
         }
       } catch (captchaErr) {
-        console.log('[FB-Login] Không thể tự động click reCAPTCHA:', captchaErr.message);
-      }
-
-      if (captchaDetected && !waitingForCode) {
-        waitingForCode = true;
-        try {
-          const ssDir = path.join(process.cwd(), 'storage');
-          if (!fs.existsSync(ssDir)) fs.mkdirSync(ssDir, { recursive: true });
-          const ssPath = path.join(ssDir, 'fb-verification.png');
-          await page.screenshot({ path: ssPath, fullPage: false });
-          verificationState.pending = true;
-          verificationState.page = page;
-          verificationState.screenshotPath = ssPath;
-          console.log('[FB-Login] Đã chụp màn hình CAPTCHA. Cửa sổ trình duyệt đã mở — hãy tương tác trực tiếp để giải CAPTCHA.');
-        } catch (ssErr) {
-          console.log('[FB-Login] Không thể chụp màn hình:', ssErr.message);
-        }
+        console.log('[FB-Login] Không thể click reCAPTCHA:', captchaErr.message);
       }
     }
 
@@ -247,31 +217,7 @@ async function waitForFacebookAuthentication(page, context) {
     const isCheckpoint = currentUrl.pathname.includes('/checkpoint');
     const isVerification = currentUrl.pathname.includes('/two_step_verification');
 
-    // Khi gặp trang xác minh OTP/checkpoint, chụp ảnh và lưu trạng thái để frontend hiển thị
-    if ((isVerification || isCheckpoint) && !waitingForCode) {
-      waitingForCode = true;
-      try {
-        const ssDir = path.join(process.cwd(), 'storage');
-        if (!fs.existsSync(ssDir)) fs.mkdirSync(ssDir, { recursive: true });
-        const ssPath = path.join(ssDir, 'fb-verification.png');
-        await page.screenshot({ path: ssPath, fullPage: false });
-        verificationState.pending = true;
-        verificationState.page = page;
-        verificationState.screenshotPath = ssPath;
-        console.log('[FB-Login] Đã chụp màn hình xác minh. Đang chờ người dùng nhập mã từ giao diện...');
-      } catch (ssErr) {
-        console.log('[FB-Login] Không thể chụp màn hình:', ssErr.message);
-      }
-    }
 
-    // Cập nhật screenshot mỗi 3 giây khi đang chờ
-    if (waitingForCode && verificationState.screenshotPath) {
-      const now2 = Date.now();
-      if (!verificationState._lastSs || now2 - verificationState._lastSs > 3000) {
-        verificationState._lastSs = now2;
-        try { await page.screenshot({ path: verificationState.screenshotPath, fullPage: false }); } catch {}
-      }
-    }
 
     if (!captchaVisible && !isLoginPage && !isCheckpoint && !isVerification) {
       await page.waitForTimeout(2000);
@@ -293,15 +239,7 @@ async function waitForFacebookAuthentication(page, context) {
       lastLogTime = now;
       const elapsed = Math.floor((now - startedAt) / 1000);
 
-      if (isVerification || isCheckpoint) {
-        if (waitingForCode) {
-          console.log(`[FB-Login] (${elapsed}s) Chờ người dùng nhập mã xác minh từ giao diện web.`);
-        } else {
-          console.log(`[FB-Login] (${elapsed}s) Đang chờ xác minh tại: ${currentUrl.pathname}`);
-        }
-      } else {
-        console.log(`[FB-Login] (${elapsed}s) Đang chờ xác minh tại: ${currentUrl.pathname}`);
-      }
+      console.log(`[FB-Login] (${elapsed}s) Đang chờ xác minh tại: ${currentUrl.pathname}`);
     }
 
     await page.waitForTimeout(1000);
@@ -330,7 +268,7 @@ async function fbLoginService(username, password, twoFactorSecret) {
   try {
     console.log('[FB-Login] Đang khởi động trình duyệt...');
     context = await chromium.launchPersistentContext(profilePath, {
-      headless: true,
+      headless: true ,
       ignoreDefaultArgs: ['--enable-automation'],
       args: [
         '--disable-gpu',
@@ -465,7 +403,7 @@ async function fbLoginService(username, password, twoFactorSecret) {
     clearUserCache();
 
     console.log('[FB-Login] Đã lưu cấu hình cookie thành công.');
-    return { success: true, cookie: cookieString };
+    return { success: true, cookie: cookieString, c_user: cUser.value };
 
   } finally {
     if (context) {
