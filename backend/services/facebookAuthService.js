@@ -204,6 +204,21 @@ async function waitForFacebookAuthentication(page, context) {
 
     // Kiểm tra cookie đăng nhập
     const cookies = await context.cookies('https://www.facebook.com');
+
+    // --- Bổ sung xử lý FunCaptcha / Arkose Labs (Thử thách âm thanh) ---
+    try {
+      const arkoseAudioBtn = page.locator('text="Chọn thử thách âm thanh"').first();
+      if (await arkoseAudioBtn.isVisible().catch(() => false)) {
+        console.log('[FB-Login] Phát hiện FunCaptcha (Arkose Labs). Đang click "Chọn thử thách âm thanh"...');
+        await arkoseAudioBtn.hover();
+        await page.waitForTimeout(1000);
+        await arkoseAudioBtn.click();
+        await page.waitForTimeout(3000);
+        console.log('[FB-Login] Đã chuyển sang màn hình Audio của FunCaptcha. Chờ xử lý tải MP3...');
+        
+        // Cần xem DOM thực tế để tải MP3 và điền kết quả
+      }
+    } catch (e) {}
     const cUser = cookies.find(cookie => cookie.name === 'c_user');
     const xs = cookies.find(cookie => cookie.name === 'xs');
 
