@@ -291,8 +291,8 @@ async function waitForFacebookAuthentication(page, context) {
 }
 
 // Thực hiện đăng nhập Facebook bằng Playwright
-async function fbLoginService(username, password, twoFactorSecret) {
-  console.log(`[FB-Login] Bắt đầu tiến trình đăng nhập cho tài khoản: ${username}`);
+async function fbLoginService(username, password, twoFactorSecret, proxyString) {
+  console.log(`[FB-Login] Bắt đầu tiến trình đăng nhập cho tài khoản: ${username}${proxyString ? ` (kèm Proxy)` : ''}`);
   
   const email = username;
   const profilePath = path.resolve(process.cwd(), 'storage/facebook-browser-profile');
@@ -300,7 +300,8 @@ async function fbLoginService(username, password, twoFactorSecret) {
   let context = null;
   try {
     console.log('[FB-Login] Đang khởi động trình duyệt...');
-    context = await chromium.launchPersistentContext(profilePath, {
+    
+    const launchOptions = {
       headless: true ,
       ignoreDefaultArgs: ['--enable-automation'],
       args: [
@@ -315,10 +316,35 @@ async function fbLoginService(username, password, twoFactorSecret) {
       locale: 'vi-VN',
       timezoneId: 'Asia/Ho_Chi_Minh',
       viewport: { width: 1280, height: 900 }
-    });
+    };
+
+    // Xử lý chuỗi Proxy (IP:Port hoặc IP:Port:User:Pass)
+    if (proxyString && typeof proxyString === 'string') {
+      const parts = proxyString.trim().split(':');
+      if (parts.length >= 2) {
+        const host = parts[0];
+        const port = parts[1];
+        launchOptions.proxy = { server: `http://${host}:${port}` };
+        
+        // Nếu có User:Pass
+        if (parts.length === 4) {
+          launchOptions.proxy.username = parts[2];
+          launchOptions.proxy.password = parts[3];
+        }
+        console.log(`[FB-Login] Cấu hình Proxy: ${host}:${port}`);
+      }
+    }
+
+    context = await chromium.launchPersistentContext(profilePath, launchOptions);
 
     const pages = context.pages();
     const page = pages[0] || await context.newPage();
+
+    // [Tối đa Stealth] Tiêm script vào mọi trang web trước khi tải để ẩn hoàn toàn cờ tự động hoá
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+      window.chrome = { runtime: {} };
+    });
 
     console.log('[FB-Login] Đang điều hướng đến trang facebook.com...');
     await page.goto('https://www.facebook.com/', { waitUntil: 'domcontentloaded', timeout: 30000 });

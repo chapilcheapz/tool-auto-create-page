@@ -8,10 +8,10 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
   // States for cookie tab
   const [cookies, setCookies] = useState(['']);
 
-  // States for FB Login tab
   const [fbUsername, setFbUsername] = useState('');
   const [fbPassword, setFbPassword] = useState('');
   const [fb2fa, setFb2fa] = useState('');
+  const [fbProxy, setFbProxy] = useState(localStorage.getItem('fb_proxy') || '');
   const [fbLoginLoading, setFbLoginLoading] = useState(false);
 
   // States for system password tab
@@ -170,14 +170,18 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
     showToast('Bắt đầu tiến trình đăng nhập Facebook', 'success');
     startVerificationPolling();
 
+    // Lưu proxy vào localStorage để dùng cho lần sau
+    localStorage.setItem('fb_proxy', fbProxy.trim());
+
     try {
+      const proxy = fbProxy.trim();
       const response = await fetch('/api/config/fb-login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('jwt_token')}`
         },
-        body: JSON.stringify({ username, password, twofa })
+        body: JSON.stringify({ username, password, twofa, proxy })
       });
       const result = await response.json();
       
@@ -509,6 +513,18 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
                   placeholder="Nhập mã bảo mật 2FA 16 hoặc 32 ký tự..."
                   value={fb2fa}
                   onChange={(e) => setFb2fa(e.target.value)}
+                  disabled={fbLoginLoading}
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <label className="text-xs font-semibold text-[var(--text-muted)]" htmlFor="inputFbProxy">Proxy IP (Dành cho Server)</label>
+                <input 
+                  type="text" 
+                  id="inputFbProxy"
+                  className="w-full bg-[var(--input-bg)] border border-[var(--input-border)] rounded-lg px-4 py-2 text-sm text-[var(--text-main)] focus:outline-none focus:border-[var(--text-muted)] transition-all outline-none"
+                  placeholder="Định dạng: IP:Port:User:Pass (Tuỳ chọn)"
+                  value={fbProxy}
+                  onChange={(e) => setFbProxy(e.target.value)}
                   disabled={fbLoginLoading}
                 />
               </div>
