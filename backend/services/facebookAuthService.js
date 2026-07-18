@@ -308,7 +308,8 @@ async function fbLoginService(username, password, twoFactorSecret, proxyString) 
     console.log('[FB-Login] Đang khởi động trình duyệt...');
     
     const launchOptions = {
-      headless: true ,
+      headless: false, // ÉP BUỘC CHẠY GIAO DIỆN THẬT ĐỂ FACEBOOK KHÔNG PHÁT HIỆN LÀ BOT
+      devtools: false,
       ignoreDefaultArgs: ['--enable-automation'],
       args: [
         '--disable-gpu',
@@ -368,6 +369,7 @@ async function fbLoginService(username, password, twoFactorSecret, proxyString) 
     }
 
     context = await chromium.launchPersistentContext(profilePath, launchOptions);
+    await context.tracing.start({ screenshots: true, snapshots: true }); // BẬT CHẾ ĐỘ QUAY VIDEO/CHỤP ẢNH TOÀN BỘ QUÁ TRÌNH
 
     const pages = context.pages();
     const page = pages[0] || await context.newPage();
@@ -502,6 +504,13 @@ async function fbLoginService(username, password, twoFactorSecret, proxyString) 
 
   } finally {
     if (context) {
+      try {
+        const tracePath = path.join(process.cwd(), 'storage', `trace_${Date.now()}.zip`);
+        await context.tracing.stop({ path: tracePath });
+        console.log(`[FB-Login] Đã lưu file BĂNG GHI HÌNH (Trace) toàn bộ quá trình tại: ${tracePath}`);
+        console.log(`[FB-Login] Mang file này lên trang https://trace.playwright.dev để mở ra xem Video, F12, Network y như trình duyệt thật!`);
+      } catch (err) {}
+      
       console.log('[FB-Login] Đang đóng trình duyệt giả lập...');
       await context.close();
     }
