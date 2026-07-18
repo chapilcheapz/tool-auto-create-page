@@ -382,6 +382,31 @@ async function fbLoginService(username, password, twoFactorSecret, proxyString) 
     // puppeteer-extra-plugin-stealth đã tự động fake navigator.webdriver và window.chrome
     // Xóa đoạn script thủ công để tránh xung đột
 
+    // [Ép Fake Phần Cứng] Vượt qua bài kiểm tra WebGL của Arkose Labs
+    await context.addInitScript(() => {
+      try {
+        const getParameterProxy = function(parameter) {
+          // 37445 = UNMASKED_VENDOR_WEBGL
+          if (parameter === 37445) {
+            return 'Intel Inc.';
+          }
+          // 37446 = UNMASKED_RENDERER_WEBGL
+          if (parameter === 37446) {
+            return 'Intel(R) Iris(TM) Plus Graphics 640';
+          }
+          // Fallback to original
+          return Object.getPrototypeOf(this).getParameter.call(this, parameter);
+        };
+        
+        if (window.WebGLRenderingContext) {
+          window.WebGLRenderingContext.prototype.getParameter = getParameterProxy;
+        }
+        if (window.WebGL2RenderingContext) {
+          window.WebGL2RenderingContext.prototype.getParameter = getParameterProxy;
+        }
+      } catch(e) {}
+    });
+
     console.log('[FB-Login] Đang điều hướng đến trang facebook.com...');
     await page.goto('https://www.facebook.com/', { waitUntil: 'domcontentloaded', timeout: 30000 });
 
