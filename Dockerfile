@@ -43,4 +43,4 @@ USER root
 RUN apt-get update && apt-get install -y xvfb && rm -rf /var/lib/apt/lists/*
 
 # Khởi chạy server Express bọc qua Xvfb với độ phân giải 1280x900
-CMD ["xvfb-run", "--auto-servernum", "--server-args=-screen 0 1280x900x24", "node", "server.js"]
+CMD xvfb-run --auto-servernum --server-args="-screen 0 1280x900x24" node server.js
