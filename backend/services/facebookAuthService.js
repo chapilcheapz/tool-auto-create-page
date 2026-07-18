@@ -318,20 +318,46 @@ async function fbLoginService(username, password, twoFactorSecret, proxyString) 
       viewport: { width: 1280, height: 900 }
     };
 
-    // Xử lý chuỗi Proxy (IP:Port hoặc IP:Port:User:Pass)
+    // Xử lý chuỗi Proxy (IP:Port hoặc IP:Port:User:Pass) hoặc API Key
+    let actualProxyString = proxyString;
     if (proxyString && typeof proxyString === 'string') {
-      const parts = proxyString.trim().split(':');
-      if (parts.length >= 2) {
-        const host = parts[0];
-        const port = parts[1];
-        launchOptions.proxy = { server: `http://${host}:${port}` };
-        
-        // Nếu có User:Pass
-        if (parts.length === 4) {
-          launchOptions.proxy.username = parts[2];
-          launchOptions.proxy.password = parts[3];
+      const trimmedProxy = proxyString.trim();
+      
+      // Nếu là API Key (không chứa dấu hai chấm)
+      if (!trimmedProxy.includes(':')) {
+        console.log(`[FB-Login] Nhận diện API Key Proxy xoay (CKey.vn). Đang lấy proxy mới...`);
+        try {
+          const proxyApiUrl = `https://ckey.vn/api/getproxyxoay?keyproxy=${trimmedProxy}&nhamang=random&tinhthanh=0`;
+          const proxyRes = await axios.get(proxyApiUrl);
+          if (proxyRes.data && proxyRes.data.status === 100) {
+             actualProxyString = proxyRes.data.proxyhttp;
+             // Xóa bỏ các dấu : thừa ở cuối nếu không có User/Pass (VD: 160.250.166.33:10694:: -> 160.250.166.33:10694)
+             actualProxyString = actualProxyString.replace(/:+$/, ''); 
+             console.log(`[FB-Login] Lấy proxy thành công từ CKey: ${actualProxyString}`);
+          } else {
+             console.log(`[FB-Login] Lỗi lấy proxy từ CKey: ${proxyRes.data ? proxyRes.data.message : 'Unknown'}`);
+             actualProxyString = null;
+          }
+        } catch (e) {
+           console.log(`[FB-Login] Lỗi gọi API CKey: ${e.message}`);
+           actualProxyString = null;
         }
-        console.log(`[FB-Login] Cấu hình Proxy: ${host}:${port}`);
+      }
+
+      if (actualProxyString) {
+        const parts = actualProxyString.split(':');
+        if (parts.length >= 2) {
+          const host = parts[0];
+          const port = parts[1];
+          launchOptions.proxy = { server: `http://${host}:${port}` };
+          
+          // Nếu có User:Pass (độ dài >= 4 và không rỗng)
+          if (parts.length >= 4 && parts[2] && parts[3]) {
+            launchOptions.proxy.username = parts[2];
+            launchOptions.proxy.password = parts[3];
+          }
+          console.log(`[FB-Login] Cấu hình Proxy cho trình duyệt: ${host}:${port}`);
+        }
       }
     }
 
