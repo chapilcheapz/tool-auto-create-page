@@ -38,6 +38,9 @@ COPY --from=builder /app/build ./build
 # Mở cổng kết nối (Port 3456)
 EXPOSE 3456
 
-# Khởi chạy server Express bằng Node.js trực tiếp
-CMD ["node", "server.js"]
+# Cài đặt Xvfb (Màn hình ảo) để Playwright có thể chạy headless: false trên Production Linux
+USER root
+RUN apt-get update && apt-get install -y xvfb && rm -rf /var/lib/apt/lists/*
 
+# Khởi chạy server Express bọc qua Xvfb với độ phân giải 1280x900
+CMD ["xvfb-run", "--auto-servernum", "--server-args=-screen 0 1280x900x24", "node", "server.js"]
