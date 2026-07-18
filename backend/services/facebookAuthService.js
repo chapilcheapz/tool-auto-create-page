@@ -202,29 +202,32 @@ async function waitForFacebookAuthentication(page, context) {
       }
     }
 
+    // --- Bổ sung xử lý FunCaptcha / Arkose Labs ---
+    const arkoseFrames = page.frames().filter(f => f.url().includes('arkoselabs.com') || f.url().includes('fbsbx.com/captcha/arkose'));
+    if (arkoseFrames.length > 0) {
+      captchaDetected = true;
+      for (const aFrame of arkoseFrames) {
+        try {
+          const audioBtn = aFrame.locator('.navigation button.audio-button, button.audio-button, button[aria-label="Thử thách âm thanh"], button[aria-label="Audio challenge"]').first();
+          if (await audioBtn.isVisible().catch(() => false)) {
+            console.log('[FB-Login] Phát hiện nút Thử thách Âm thanh của Arkose Labs. Đang click...');
+            await audioBtn.hover();
+            await page.waitForTimeout(500 + Math.random() * 500);
+            await audioBtn.click();
+            console.log('[FB-Login] Đã click nút chuyển sang Âm thanh Arkose Labs.');
+            await page.waitForTimeout(3000);
+            break; // Đã click thành công thì thoát vòng lặp các frames
+          }
+        } catch (e) {
+          // Bỏ qua lỗi locator
+        }
+      }
+    }
+
     // Kiểm tra cookie đăng nhập
     const cookies = await context.cookies('https://www.facebook.com');
 
-    // --- Bổ sung xử lý FunCaptcha / Arkose Labs (Thử thách âm thanh) ---
-    // Dump mã HTML của trang hiện tại và các iframe con để phân tích DOM
-    try {
-      const pageHtml = await page.content();
-      if (pageHtml.includes('MatchKey của Arkose Labs') || pageHtml.includes('Chọn thử thách âm thanh')) {
-        let fullHtml = `<!-- PAGE URL: ${page.url()} -->\n` + pageHtml;
-        for (const frame of page.frames()) {
-          try {
-            fullHtml += `\n\n<!-- IFRAME URL: ${frame.url()} -->\n`;
-            fullHtml += await frame.content();
-          } catch(e) {}
-        }
-        const dumpPath = path.join(process.cwd(), 'storage', 'funcaptcha_source.html');
-        fs.writeFileSync(dumpPath, fullHtml);
-        console.log(`[FB-Login] Đã phát hiện FunCaptcha! Đã tải và lưu toàn bộ Source Code ra file: ${dumpPath} để phân tích.`);
-        
-        // Ngủ đông 10s để tránh spam lưu liên tục
-        await page.waitForTimeout(10000);
-      }
-    } catch(e) {}
+
     const cUser = cookies.find(cookie => cookie.name === 'c_user');
     const xs = cookies.find(cookie => cookie.name === 'xs');
 
