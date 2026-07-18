@@ -66,8 +66,8 @@ async function startServer() {
     // Bỏ qua lỗi khởi tạo để tiếp tục chạy server
   }
 
-  app.listen(PORT, () => {
-    // console.log(`\n🚀 Server đang chạy tại cổng: http://localhost:${PORT}\n`);
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`\n🚀 Server đang chạy tại cổng: http://0.0.0.0:${PORT}\n`);
   });
 }
 
