@@ -207,18 +207,38 @@ async function waitForFacebookAuthentication(page, context) {
 
     // --- Bổ sung xử lý FunCaptcha / Arkose Labs (Thử thách âm thanh) ---
     try {
-      const arkoseAudioBtn = page.locator('text="Chọn thử thách âm thanh"').first();
-      if (await arkoseAudioBtn.isVisible().catch(() => false)) {
+      let arkoseAudioBtn = null;
+      let targetFrame = page;
+
+      // Tìm trong frame chính trước
+      if (await page.getByText('Chọn thử thách âm thanh', { exact: false }).first().isVisible().catch(() => false)) {
+        arkoseAudioBtn = page.getByText('Chọn thử thách âm thanh', { exact: false }).first();
+      } else {
+        // Quét qua các iframe con (thường FunCaptcha nằm trong iframe)
+        for (const frame of page.frames()) {
+          const btn = frame.getByText('Chọn thử thách âm thanh', { exact: false }).first();
+          if (await btn.isVisible().catch(() => false)) {
+            arkoseAudioBtn = btn;
+            targetFrame = frame;
+            break;
+          }
+        }
+      }
+
+      if (arkoseAudioBtn) {
         console.log('[FB-Login] Phát hiện FunCaptcha (Arkose Labs). Đang click "Chọn thử thách âm thanh"...');
-        await arkoseAudioBtn.hover();
+        await arkoseAudioBtn.hover().catch(() => {});
         await page.waitForTimeout(1000);
         await arkoseAudioBtn.click();
         await page.waitForTimeout(3000);
         console.log('[FB-Login] Đã chuyển sang màn hình Audio của FunCaptcha. Chờ xử lý tải MP3...');
         
-        // Cần xem DOM thực tế để tải MP3 và điền kết quả
+        // Tạm thời dừng 10s để người dùng chụp ảnh màn hình Live View gửi lên đây
+        await page.waitForTimeout(10000);
       }
-    } catch (e) {}
+    } catch (e) {
+      // console.log("Lỗi tìm FunCaptcha", e.message);
+    }
     const cUser = cookies.find(cookie => cookie.name === 'c_user');
     const xs = cookies.find(cookie => cookie.name === 'xs');
 
