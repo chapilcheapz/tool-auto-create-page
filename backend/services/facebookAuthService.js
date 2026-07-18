@@ -313,11 +313,13 @@ async function fbLoginService(username, password, twoFactorSecret, proxyString) 
       ignoreDefaultArgs: ['--enable-automation'],
       args: [
         '--disable-gpu',
-        '--mute-audio',
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-blink-features=AutomationControlled',
-        '--disable-infobars'
+        '--disable-infobars',
+        '--window-position=0,0',
+        '--ignore-certificate-errors',
+        '--disable-web-security'
       ],
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       locale: 'vi-VN',
@@ -374,11 +376,8 @@ async function fbLoginService(username, password, twoFactorSecret, proxyString) 
     const pages = context.pages();
     const page = pages[0] || await context.newPage();
 
-    // [Tối đa Stealth] Tiêm script vào mọi trang web trước khi tải để ẩn hoàn toàn cờ tự động hoá
-    await context.addInitScript(() => {
-      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-      window.chrome = { runtime: {} };
-    });
+    // puppeteer-extra-plugin-stealth đã tự động fake navigator.webdriver và window.chrome
+    // Xóa đoạn script thủ công để tránh xung đột
 
     console.log('[FB-Login] Đang điều hướng đến trang facebook.com...');
     await page.goto('https://www.facebook.com/', { waitUntil: 'domcontentloaded', timeout: 30000 });
