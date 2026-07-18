@@ -30,13 +30,13 @@ async function saveConfig(req, res) {
 }
 
 async function fbLogin(req, res) {
-  const { username, password, twoFactorSecret } = req.body;
+  const { username, password, twoFactorSecret, proxy } = req.body;
   if (!username || !password) {
     return res.status(400).json({ success: false, error: 'Vui lòng cung cấp tài khoản và mật khẩu Facebook.' });
   }
 
   try {
-    const result = await fbLoginService(username, password, twoFactorSecret);
+    const result = await fbLoginService(username, password, twoFactorSecret, proxy);
     return res.json(result);
   } catch (error) {
     console.error('[FB-Login ERROR]', error);
