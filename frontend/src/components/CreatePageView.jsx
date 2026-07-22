@@ -86,7 +86,7 @@ export default function CreatePageView({ cookie, showToast, onPageCreated }) {
           }
         };
 
-        eventSource.onerror = (err) => {
+        eventSource.onerror = () => {
           eventSource.close();
           setLoading(false);
           showToast('Mất kết nối với luồng logs chiến dịch.', 'error');
