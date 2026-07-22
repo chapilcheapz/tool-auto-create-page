@@ -42,7 +42,7 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
         });
         setDiagnoses(nextDiagnoses);
       }
-    } catch (e) {
+    } catch {
       console.error('Lỗi chạy chẩn đoán cookie:', e.message);
     } finally {
       setDiagnosing(false);
@@ -133,7 +133,7 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
       } else {
         showToast(`Không thể lưu cấu hình: ${result.error}`, 'error');
       }
-    } catch (e) {
+    } catch {
       showToast('Lỗi kết nối máy chủ.', 'error');
     }
   };
@@ -149,7 +149,7 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
       } else {
         showToast(`Không thể xoá cấu hình: ${result.error}`, 'error');
       }
-    } catch (e) {
+    } catch {
       showToast('Lỗi kết nối máy chủ.', 'error');
     }
   };
@@ -271,8 +271,6 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
 
                   onClick={async (e) => {
                     const rect = e.target.getBoundingClientRect();
-                    const imgW = e.target.naturalWidth;
-                    const imgH = e.target.naturalHeight;
                     const displayW = rect.width;
                     const displayH = rect.height;
                     // Tính toạ độ thực trên viewport gốc (1280x900)

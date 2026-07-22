@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Heart, Play, RefreshCw, Terminal, Layers } from 'lucide-react';
+import { Play, RefreshCw, Terminal, Layers } from 'lucide-react';
 import * as api from '../utils/api';
 
 export default function ReactCampaignView({ cookie, showToast, onOpenSettings }) {

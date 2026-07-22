@@ -32,7 +32,7 @@ export default function LoginView({ onLoginSuccess, showToast }) {
         setErrorMsg(result.error || 'Sai tên đăng nhập hoặc mật khẩu.');
         showToast(result.error || 'Đăng nhập thất bại.', 'error');
       }
-    } catch (err) {
+    } catch {
       setErrorMsg('Lỗi kết nối đến máy chủ.');
       showToast('Lỗi kết nối máy chủ.', 'error');
     } finally {

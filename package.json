@@ -1,6 +1,7 @@
 {
   "name": "tool-auto-create-page",
   "version": "1.0.0",
+  "private": true,
   "description": "Tool tự động tạo Facebook Page",
   "main": "server.js",
   "workspaces": [
@@ -21,8 +22,6 @@
     "cors": "^2.8.5",
     "dotenv": "^17.4.2",
     "express": "^4.21.0",
-    "form-data": "^4.0.6",
-    "https-proxy-agent": "^9.1.0",
     "jsonwebtoken": "^9.0.3",
     "playwright": "^1.61.1",
     "playwright-extra": "^4.3.6",
@@ -31,5 +30,9 @@
   "devDependencies": {
     "concurrently": "^10.0.3"
   },
-  "packageManager": "pnpm@11.7.0+sha512.19cc852c120c7125760f2443ee6be0ca5b40f9f50598de1a09a1f177503e010e57c23c77646e01e761de59bf874fb22a3398c33ab9691fc13eb946b6f0f4d620"
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0",
+    "npm": ">=10"
+  },
+  "packageManager": "npm@10.9.2"
 }
