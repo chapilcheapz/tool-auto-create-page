@@ -1,5 +1,5 @@
 import React from 'react';
-import { Sparkles, LayoutDashboard, PlusCircle, Heart, Settings, LogOut, Menu } from 'lucide-react';
+import { Sparkles, LayoutDashboard, PlusCircle, Heart, Music2, Settings, LogOut } from 'lucide-react';
 
 export default function Sidebar({ 
   currentView, 
@@ -14,6 +14,7 @@ export default function Sidebar({
     { id: 'list', label: 'Danh sách Page', icon: LayoutDashboard },
     { id: 'create', label: 'Tạo Page', icon: PlusCircle },
     { id: 'react', label: 'Thả cảm xúc hàng loạt', icon: Heart },
+    { id: 'download', label: 'Studio âm thanh & video', icon: Music2 },
   ];
 
   return (
@@ -49,6 +50,7 @@ export default function Sidebar({
             return (
               <button
                 key={item.id}
+                type="button"
                 onClick={() => {
                   setView(item.id);
                   onClose();
@@ -82,6 +84,7 @@ export default function Sidebar({
           )}
 
           <button 
+            type="button"
             onClick={() => {
               onOpenSettings();
               onClose();
@@ -93,6 +96,7 @@ export default function Sidebar({
           </button>
           
           <button 
+            type="button"
             onClick={onLogout}
             className="w-full flex items-center gap-3 px-4 py-3 text-[var(--text-muted)] hover:text-red-400 hover:bg-red-500/10 rounded-xl text-xs font-semibold transition-all bg-transparent border border-transparent text-left cursor-pointer"
           >

@@ -552,32 +552,60 @@ async function getFbAvatarService(requestedUid) {
     throw new Error('Chưa cấu hình cookie.');
   }
 
+  // 0. Nếu requestedUid là URL trực tiếp (http/https), proxy trực tiếp bytes từ URL đó
+  if (requestedUid && (requestedUid.startsWith('http://') || requestedUid.startsWith('https://'))) {
+    const cacheKey = requestedUid;
+    const cache = memoryAvatarCache[cacheKey];
+    if (cache && cache.bytes && cache.expiresAt > Date.now()) {
+      return cache;
+    }
+    try {
+      const imgRes = await axios.get(requestedUid, {
+        responseType: 'arraybuffer',
+        timeout: 10000,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+        }
+      });
+      const ct = imgRes.headers['content-type'] || 'image/jpeg';
+      if (imgRes.data && imgRes.data.byteLength > 200) {
+        const result = {
+          bytes: Buffer.from(imgRes.data),
+          contentType: ct,
+          expiresAt: Date.now() + 6 * 60 * 60 * 1000
+        };
+        memoryAvatarCache[cacheKey] = result;
+        return result;
+      }
+    } catch (e) {
+      console.error(`❌ [Avatar-DirectProxy] Lỗi proxy URL: ${requestedUid}`, e.message);
+    }
+  }
+
   const cookieList = cookieRaw.split('\n').map(c => c.trim()).filter(Boolean);
   let targetCookie = cookieList[0] || cookieRaw;
 
-  if (requestedUid) {
-    const found = cookieList.find(c => {
-      const m = c.match(/c_user=(\d+)/);
-      return m && m[1] === requestedUid;
-    });
-    if (found) targetCookie = found;
+  // Lấy targetUid từ requestedUid hoặc c_user trong cookie
+  let targetUid = requestedUid;
+  if (!targetUid || targetUid === 'undefined' || targetUid === 'null') {
+    const m = targetCookie.match(/c_user=(\d+)/);
+    if (m) targetUid = m[1];
   }
 
-  const uidMatch = targetCookie.match(/c_user=(\d+)/);
-  if (!uidMatch) {
-    throw new Error('Không tìm thấy UID trong cookie.');
+  if (!targetUid) {
+    throw new Error('Không tìm thấy UID.');
   }
-  const uid = uidMatch[1];
-  console.log(`[Avatar] Request avatar uid=${uid}`);
 
-  const cache = memoryAvatarCache[uid];
+  console.log(`[Avatar] Request avatar uid=${targetUid}`);
+
+  const cache = memoryAvatarCache[targetUid];
   if (cache && cache.bytes && cache.expiresAt > Date.now()) {
-    console.log(`[Avatar] Cache hit uid=${uid}`);
+    console.log(`[Avatar] Cache hit uid=${targetUid}`);
     return cache;
   }
 
-  console.log(`[Avatar] Cache miss uid=${uid}, fetching...`);
-  const fetched = await fetchAvatarBytes(targetCookie, uid);
+  console.log(`[Avatar] Cache miss uid=${targetUid}, fetching...`);
+  const fetched = await fetchAvatarBytes(targetCookie, targetUid);
   if (fetched) {
     return fetched;
   }
@@ -585,154 +613,52 @@ async function getFbAvatarService(requestedUid) {
   return null;
 }
 
-// Cào bytes avatar của tài khoản
+// Cào bytes avatar của tài khoản hoặc fanpage
 async function fetchAvatarBytes(cookie, uid) {
   const cache = memoryAvatarCache[uid];
   if (cache && cache.bytes && cache.expiresAt > Date.now()) {
     return cache;
   }
 
-  const commonHeaders = {
-    'Cookie': cookie,
-    'User-Agent': 'Mozilla/5.0 (Linux; Android 12; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-    'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7'
-  };
-
-  // Phương án 1: Scrape mbasic
-  try {
-    const mbasicRes = await axios.get(`https://mbasic.facebook.com/profile.php?id=${uid}`, {
-      headers: commonHeaders,
-      timeout: 10000,
-      maxRedirects: 5
-    });
-    const html = typeof mbasicRes.data === 'string' ? mbasicRes.data : '';
-    const imgPatterns = [
-      /<img[^>]+src="(https?:\/\/[^"]*?scontent[^"]*?fbcdn\.net[^"]*?)"/gi,
-      /<img[^>]+src="(https?:\/\/[^"]*?fbcdn\.net[^"]*?)"/gi,
-    ];
-
-    let avatarCdnUrl = null;
-    for (const pattern of imgPatterns) {
-      let match;
-      while ((match = pattern.exec(html)) !== null) {
-        let url = match[1].replace(/&amp;/g, '&');
-        if (url.includes('static') || url.includes('rsrc.php') || url.includes('emoji')) continue;
-        if (url.includes('/t39.30808-1/') || url.includes('/t1.30497-1/') || url.includes('/t39.30808-6/')) {
-          avatarCdnUrl = url;
-          break;
-        }
-        if (!avatarCdnUrl && url.includes('fbcdn.net')) {
-          avatarCdnUrl = url;
-        }
-      }
-      if (avatarCdnUrl && (avatarCdnUrl.includes('/t39.30808-1/') || avatarCdnUrl.includes('/t1.30497-1/'))) break;
-    }
-
-    if (avatarCdnUrl) {
-      const imgRes = await axios.get(avatarCdnUrl, {
+  // 0. Nếu uid là URL trực tiếp (http/https), tải bytes từ CDN đó
+  if (uid && (uid.startsWith('http://') || uid.startsWith('https://'))) {
+    try {
+      const imgRes = await axios.get(uid, {
         responseType: 'arraybuffer',
-        timeout: 8000
+        timeout: 10000,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+        }
       });
       const ct = imgRes.headers['content-type'] || 'image/jpeg';
-      if (imgRes.data && imgRes.data.byteLength > 500 && ct.includes('image')) {
+      if (imgRes.data && imgRes.data.byteLength > 200) {
         const result = {
           bytes: Buffer.from(imgRes.data),
           contentType: ct,
-          expiresAt: Date.now() + 2 * 60 * 60 * 1000
+          expiresAt: Date.now() + 6 * 60 * 60 * 1000
         };
         memoryAvatarCache[uid] = result;
         return result;
       }
+    } catch (e) {
+      console.error(`❌ [Avatar-Direct] Lỗi proxy URL: ${uid}`, e.message);
     }
-  } catch (mbasicErr) {
-    console.error(`❌ [Avatar-mbasic] uid=${uid} lỗi:`, mbasicErr.message);
   }
 
-  // Phương án 2: Scrape Homepage
-  try {
-    const fbRes = await axios.get('https://www.facebook.com/', {
-      headers: {
-        ...commonHeaders,
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
-      },
-      timeout: 10000,
-      maxRedirects: 5
-    });
-    const html = typeof fbRes.data === 'string' ? fbRes.data : '';
-    const jsonPatterns = [
-      /"profilePicLarge"\s*:\s*\{\s*"uri"\s*:\s*"([^"]+)"/,
-      /"profilePicMedium"\s*:\s*\{\s*"uri"\s*:\s*"([^"]+)"/,
-      /"profilePic(?:ture)?"\s*:\s*\{\s*"uri"\s*:\s*"([^"]+)"/,
-      /"profile_picture"\s*:\s*\{\s*"uri"\s*:\s*"([^"]+)"/,
-    ];
-
-    let avatarUrl = null;
-    for (const pattern of jsonPatterns) {
-      const match = html.match(pattern);
-      if (match) {
-        avatarUrl = match[1].replace(/\\\//g, '/');
-        if (avatarUrl.includes('fbcdn.net') && !avatarUrl.includes('176159830277856')) {
-          break;
-        }
-        avatarUrl = null;
-      }
-    }
-
-    if (avatarUrl) {
-      const imgRes = await axios.get(avatarUrl, {
-        responseType: 'arraybuffer',
-        timeout: 8000
-      });
-      const ct = imgRes.headers['content-type'] || 'image/jpeg';
-      if (imgRes.data && imgRes.data.byteLength > 500 && ct.includes('image')) {
-        const result = {
-          bytes: Buffer.from(imgRes.data),
-          contentType: ct,
-          expiresAt: Date.now() + 2 * 60 * 60 * 1000
-        };
-        memoryAvatarCache[uid] = result;
-        return result;
-      }
-    }
-  } catch (homeErr) {
-    console.error(`❌ [Avatar-Homepage] uid=${uid} lỗi:`, homeErr.message);
-  }
-
-  // Phương án 3: Graph API
-  try {
-    const graphUrl = `https://graph.facebook.com/${uid}/picture?type=large&width=200&height=200`;
-    const imgRes = await axios.get(graphUrl, {
-      responseType: 'arraybuffer',
-      timeout: 10000
-    });
-    const ct = imgRes.headers['content-type'] || 'image/jpeg';
-    if (imgRes.data && imgRes.data.byteLength > 5000 && ct.includes('image')) {
-      const result = {
-        bytes: Buffer.from(imgRes.data),
-        contentType: ct,
-        expiresAt: Date.now() + 2 * 60 * 60 * 1000
-      };
-      memoryAvatarCache[uid] = result;
-      return result;
-    }
-  } catch (graphErr) {
-    console.error(`❌ [Avatar-Graph] uid=${uid} lỗi:`, graphErr.message);
-  }
-
-  // Phương án 4: Playwright
+  // 1. Playwright truy cập trực tiếp trang cá nhân/fanpage của UID (ví dụ: https://www.facebook.com/123456 hoặc /me)
   let browser = null;
   try {
-    console.log(`[Avatar-Playwright] uid=${uid} đang khởi động browser...`);
+    console.log(`[Avatar-Playwright] UID=${uid} đang lấy avatar...`);
     browser = await chromium.launch({
-    headless: true,
+      headless: true,
       args: [
         '--disable-gpu', '--mute-audio', '--no-sandbox',
         '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled'
       ]
     });
     const context = await browser.newContext({
-      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+      locale: 'vi-VN'
     });
 
     const playwrightCookies = [];
@@ -748,77 +674,43 @@ async function fetchAvatarBytes(cookie, uid) {
     await context.addCookies(playwrightCookies);
     const page = await context.newPage();
 
-    let avatarUrl = null;
-    const avatarUrlPromise = new Promise((resolve) => {
-      page.on('response', async (response) => {
-        const url = response.url();
-        if (
-          url.includes('fbcdn.net') &&
-          (url.includes('/t39.30808-1/') || url.includes('/t1.30497-1/')) &&
-          !avatarUrl
-        ) {
-          try {
-            const body = await response.body();
-            const ct = response.headers()['content-type'] || 'image/jpeg';
-            if (body && body.length > 500 && ct.includes('image')) {
-              avatarUrl = url;
-              resolve({ bytes: body, contentType: ct });
-            }
-          } catch {}
-        }
-      });
-      setTimeout(() => resolve(null), 15000);
-    });
+    const cUserMatch = cookie.match(/c_user=(\d+)/);
+    const isMainUser = cUserMatch && cUserMatch[1] === uid;
+    const targetUrl = isMainUser ? 'https://www.facebook.com/me' : `https://www.facebook.com/${uid}`;
 
-    await page.goto('https://www.facebook.com/', { waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => {});
-    await page.waitForTimeout(3000);
+    await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+    await page.waitForTimeout(2000);
 
-    const intercepted = await avatarUrlPromise;
-    if (intercepted) {
-      const result = {
-        bytes: Buffer.from(intercepted.bytes),
-        contentType: intercepted.contentType,
-        expiresAt: Date.now() + 2 * 60 * 60 * 1000
-      };
-      memoryAvatarCache[uid] = result;
-      return result;
-    }
-
-    const selectors = [
-      'div[role="banner"] div[role="button"] img[src*="fbcdn"]',
-      'div[aria-label*="Trang cá nhân"] img[src*="fbcdn"]',
-      'div[aria-label*="Your profile"] img[src*="fbcdn"]',
-      'img[src*="fbcdn.net/v/t39.30808-1"]'
-    ];
-    for (const selector of selectors) {
-      const el = page.locator(selector).first();
-      if (await el.isVisible().catch(() => false)) {
-        const src = await el.getAttribute('src');
-        if (src && src.includes('fbcdn.net') && !src.includes('176159830277856')) {
-          avatarUrl = src;
-          break;
+    const avatarUrl = await page.evaluate(() => {
+      const images = Array.from(document.querySelectorAll('svg image, img[alt*="đại diện"], img[alt*="profile"], img'));
+      for (const img of images) {
+        const src = img.getAttribute('xlink:href') || img.getAttribute('href') || img.src || '';
+        if (src.includes('fbcdn.net') && (src.includes('/t39.30808-1/') || src.includes('/t1.30497-1/'))) {
+          return src;
         }
       }
-    }
+      return null;
+    });
+
     if (avatarUrl) {
+      console.log(`[Avatar-Playwright] UID=${uid} tìm thấy Avatar URL: ${avatarUrl}`);
       const imgRes = await axios.get(avatarUrl, {
-        headers: { 'Cookie': cookie },
         responseType: 'arraybuffer',
-        timeout: 8000
+        timeout: 10000
       });
       const ct = imgRes.headers['content-type'] || 'image/jpeg';
-      if (imgRes.data && imgRes.data.byteLength > 500) {
+      if (imgRes.data && imgRes.data.byteLength > 500 && ct.includes('image')) {
         const result = {
           bytes: Buffer.from(imgRes.data),
           contentType: ct,
-          expiresAt: Date.now() + 2 * 60 * 60 * 1000
+          expiresAt: Date.now() + 6 * 60 * 60 * 1000
         };
         memoryAvatarCache[uid] = result;
         return result;
       }
     }
   } catch (err) {
-    console.error(`❌ [Avatar-Playwright] uid=${uid} lỗi:`, err.message);
+    console.error(`❌ [Avatar-Playwright] UID=${uid} lỗi:`, err.message);
   } finally {
     if (browser) await browser.close().catch(() => {});
   }

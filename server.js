@@ -23,11 +23,15 @@ app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-File-Name']
 }));
 app.use(cookieParser(process.env.COOKIE_SECRET || 'fallback_secret'));
 app.use(express.json({ limit: '10mb' }));
 
+// Public health check must be registered before the protected /api router.
+app.get('/api/status', (req, res) => {
+  res.json({ status: 'ok', time: new Date().toISOString() });
+});
 
 app.use(express.static(path.join(__dirname, 'build')));
 
@@ -45,10 +49,12 @@ try {
   });
 }
 
-
-// Health check
-app.get('/api/status', (req, res) => {
-  res.json({ status: 'ok', time: new Date().toISOString() });
+// API requests must never fall through to the React index page.
+app.use('/api', (req, res) => {
+  res.status(404).json({
+    success: false,
+    error: `Không tìm thấy API ${req.method} ${req.originalUrl}`
+  });
 });
 
 // Catch-all route to serve React app index.html for SPA routing
@@ -66,10 +72,13 @@ async function startServer() {
     // Bỏ qua lỗi khởi tạo để tiếp tục chạy server
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const httpServer = app.listen(PORT, '0.0.0.0', () => {
     console.log(`\n🚀 Server đang chạy tại cổng: http://0.0.0.0:${PORT}\n`);
   });
+  const configuredRequestTimeout = Number.parseInt(process.env.HTTP_REQUEST_TIMEOUT_MS || '', 10);
+  httpServer.requestTimeout = Number.isSafeInteger(configuredRequestTimeout) && configuredRequestTimeout >= 300000
+    ? configuredRequestTimeout
+    : 30 * 60 * 1000;
 }
 
 startServer();
-

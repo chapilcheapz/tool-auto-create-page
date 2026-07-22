@@ -38,9 +38,12 @@ COPY --from=builder /app/build ./build
 # Mở cổng kết nối (Port 3456)
 EXPOSE 3456
 
-# Cài đặt Xvfb (Màn hình ảo) để Playwright có thể chạy headless: false trên Production Linux
+# Cài đặt Xvfb và bộ công cụ media dùng cho luồng tách/cắt/ghép âm thanh.
+# yt-dlp gọi ffmpeg/ffprobe trực tiếp nên cả ba binary phải có trong runtime image.
 USER root
-RUN apt-get update && apt-get install -y xvfb && rm -rf /var/lib/apt/lists/*
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends xvfb ffmpeg yt-dlp \
+    && rm -rf /var/lib/apt/lists/*
 
 # Khởi chạy server Express bọc qua Xvfb với độ phân giải 1280x900
 CMD xvfb-run --auto-servernum --server-args="-screen 0 1280x900x24" node server.js
