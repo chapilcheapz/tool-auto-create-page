@@ -4,6 +4,17 @@ const axios = require('axios');
 // In-memory cache for extracted tokens to avoid launching browser/making requests repeatedly
 const tokenCache = new Map();
 
+function decodeUnicode(str) {
+  if (!str) return str;
+  try {
+    return str.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => 
+      String.fromCharCode(parseInt(hex, 16))
+    );
+  } catch (e) {
+    return str;
+  }
+}
+
 /**
  * Trích xuất fb_dtsg, __user, lsd, jazoest bằng phương thức HTTP GET siêu tốc (axios)
  */
@@ -80,12 +91,35 @@ async function extractViaHttp(cookieString, userId) {
                      html.match(/"haste_session"\s*:\s*"(\d+)"/);
     if (hsiMatch) result.__hsi = hsiMatch[1];
 
+    // Trích xuất tên người dùng trang cá nhân nếu có
+    const userNamePatterns = [
+      /\["CurrentUserInitialData",\[\],\{"ACCOUNT_ID":"\d+","NAME":"([^"]+)"/,
+      /"ACCOUNT_ID"\s*:\s*"\d+"\s*,\s*"NAME"\s*:\s*"([^"]+)"/,
+      /"USER_ID"\s*:\s*"\d+"\s*,\s*"NAME"\s*:\s*"([^"]+)"/,
+      /"NAME"\s*:\s*"([^"]+)"/,
+      /"short_name"\s*:\s*"([^"]+)"/
+    ];
+    for (const pat of userNamePatterns) {
+      const match = html.match(pat);
+      if (match && match[1]) {
+        let rawName = match[1];
+        try {
+          rawName = rawName.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+        } catch (e) {}
+        if (rawName && !rawName.includes('{') && rawName.length < 50) {
+          result.userName = rawName.trim();
+          break;
+        }
+      }
+    }
+
     // Ensure we extracted the essential tokens (fb_dtsg is mandatory)
     if (result.fb_dtsg) {
       return {
         success: true,
         fb_dtsg: result.fb_dtsg,
         __user: userId,
+        userName: result.userName || null,
         lsd: result.lsd,
         jazoest: result.jazoest,
         __rev: result.__rev,
@@ -164,8 +198,8 @@ async function extractTokens(cookieString) {
 
     await page.goto('https://www.facebook.com/', {
       waitUntil: 'domcontentloaded',
-      timeout: 30000
-    });
+      timeout: 20000
+    }).catch(() => {});
 
     // Giảm thời gian chờ xuống 1.5s thay vì 3s cho nhanh hơn
     await page.waitForTimeout(1500);
@@ -179,7 +213,7 @@ async function extractTokens(cookieString) {
         __hsi: null,
       };
 
-      const html = document.documentElement.innerHTML;
+      const html = document.documentElement ? document.documentElement.innerHTML : '';
 
       const dtsgPatterns = [
         /"DTSGInitialData".*?"token"\s*:\s*"([^"]+)"/,
@@ -232,6 +266,30 @@ async function extractTokens(cookieString) {
                        html.match(/"haste_session"\s*:\s*"(\d+)"/);
       if (hsiMatch) result.__hsi = hsiMatch[1];
 
+      // Trích xuất tên tài khoản Facebook
+      let foundName = null;
+      const navEl = document.querySelector('a[href*="/profile.php"] span, a[aria-label*="Trang cá nhân"] span, a[aria-label*="profile"] span');
+      if (navEl && navEl.innerText && navEl.innerText.trim()) {
+        foundName = navEl.innerText.trim();
+      }
+      if (!foundName) {
+        const userNamePatterns = [
+          /\["CurrentUserInitialData",\[\],\{"ACCOUNT_ID":"\d+","NAME":"([^"]+)"/,
+          /"ACCOUNT_ID"\s*:\s*"\d+"\s*,\s*"NAME"\s*:\s*"([^"]+)"/,
+          /"USER_ID"\s*:\s*"\d+"\s*,\s*"NAME"\s*:\s*"([^"]+)"/,
+          /"NAME"\s*:\s*"([^"]+)"/,
+          /"short_name"\s*:\s*"([^"]+)"/
+        ];
+        for (const pat of userNamePatterns) {
+          const match = html.match(pat);
+          if (match && match[1]) {
+            foundName = match[1];
+            break;
+          }
+        }
+      }
+      result.userName = foundName;
+
       return result;
     });
 
@@ -239,9 +297,11 @@ async function extractTokens(cookieString) {
     browser = null;
 
     if (tokens.fb_dtsg) {
+      const decodedUserName = decodeUnicode(tokens.userName);
       const successData = {
         fb_dtsg: tokens.fb_dtsg,
         __user: userId,
+        userName: decodedUserName || null,
         lsd: tokens.lsd,
         jazoest: tokens.jazoest,
         __rev: tokens.__rev,

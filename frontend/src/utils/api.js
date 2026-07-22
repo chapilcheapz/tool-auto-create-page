@@ -1,8 +1,28 @@
 /**
- * API Module - Handles all backend communication with JWT Authentication
+ * API Module - Handles all backend communication with JWT Authentication & Graceful Error Handling
  */
 
 let isRefreshing = null;
+
+async function safeJsonResponse(response) {
+  if (!response) {
+    throw new Error('Không nhận được phản hồi từ máy chủ.');
+  }
+
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    const text = await response.text();
+    if (!response.ok) {
+      if (response.status === 502 || response.status === 503 || response.status === 504) {
+        throw new Error('Máy chủ Backend hoặc dịch vụ trung gian chưa sẵn sàng. Vui lòng kiểm tra lại server.js.');
+      }
+      throw new Error(text || `Lỗi máy chủ (${response.status})`);
+    }
+    throw new Error('Phản hồi từ máy chủ không phải định dạng JSON.');
+  }
+
+  return response.json();
+}
 
 async function performRefresh() {
   const refreshToken = localStorage.getItem('refresh_token');
@@ -24,7 +44,7 @@ async function performRefresh() {
     throw err;
   }
 
-  const result = await response.json();
+  const result = await safeJsonResponse(response);
   if (result.success && result.token && result.refreshToken) {
     localStorage.setItem('jwt_token', result.token);
     localStorage.setItem('refresh_token', result.refreshToken);
@@ -43,31 +63,35 @@ async function authFetch(url, options = {}) {
     options.headers['Authorization'] = `Bearer ${token}`;
   }
   
-  let response = await fetch(url, options);
-  
+  let response;
+  try {
+    response = await fetch(url, options);
+  } catch (netErr) {
+    if (netErr?.name === 'AbortError') {
+      throw netErr;
+    }
+    throw new Error('Không thể kết nối tới máy chủ backend. Vui lòng kiểm tra lại server.js');
+  }
+
   if (response.status === 401) {
     try {
       if (!isRefreshing) {
         isRefreshing = performRefresh();
       }
       const newToken = await isRefreshing;
-      isRefreshing = null; // Reset refresh state
+      isRefreshing = null;
       
-      // Retry request with new token
       options.headers['Authorization'] = `Bearer ${newToken}`;
       response = await fetch(url, options);
-      
     } catch (err) {
       isRefreshing = null;
-      // Chỉ đăng xuất nếu là lỗi xác thực thực tế (401 hoặc 403)
       if (err.status === 401 || err.status === 403) {
         localStorage.removeItem('jwt_token');
         localStorage.removeItem('refresh_token');
         window.dispatchEvent(new Event('auth-expired'));
         throw new Error('Phiên làm việc hết hạn. Vui lòng đăng nhập lại.');
       }
-      // Đối với lỗi mạng hoặc lỗi máy chủ 500, giữ lại phiên đăng nhập
-      throw new Error('Lỗi kết nối máy chủ. Vui lòng kiểm tra lại đường truyền.');
+      throw new Error('Lỗi kết nối máy chủ backend. Vui lòng kiểm tra lại.');
     }
   }
   
@@ -77,10 +101,9 @@ async function authFetch(url, options = {}) {
     window.dispatchEvent(new Event('auth-expired'));
     throw new Error('Phiên làm việc hết hạn. Vui lòng đăng nhập lại.');
   }
-  
+
   return response;
 }
-
 
 export async function login(username, password) {
   const response = await fetch('/api/auth/login', {
@@ -88,21 +111,12 @@ export async function login(username, password) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password })
   });
-  const data = await response.json();
+  const data = await safeJsonResponse(response);
   if (data.success && data.token && data.refreshToken) {
     localStorage.setItem('jwt_token', data.token);
     localStorage.setItem('refresh_token', data.refreshToken);
   }
   return data;
-}
-
-export async function register(username, email, password) {
-  const response = await fetch('/api/auth/register', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, email, password })
-  });
-  return response.json();
 }
 
 export async function changePassword(currentPassword, newPassword) {
@@ -111,17 +125,17 @@ export async function changePassword(currentPassword, newPassword) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ currentPassword, newPassword })
   });
-  return response.json();
+  return safeJsonResponse(response);
 }
 
 export async function fetchConfig() {
   const response = await authFetch('/api/config');
-  return response.json();
+  return safeJsonResponse(response);
 }
 
 export async function diagnoseCookies() {
   const response = await authFetch('/api/config/diagnose-cookies');
-  return response.json();
+  return safeJsonResponse(response);
 }
 
 export async function saveConfig(cookie) {
@@ -130,7 +144,7 @@ export async function saveConfig(cookie) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ cookie })
   });
-  return response.json();
+  return safeJsonResponse(response);
 }
 
 export async function getPages(cookie) {
@@ -139,7 +153,7 @@ export async function getPages(cookie) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ cookie })
   });
-  return response.json();
+  return safeJsonResponse(response);
 }
 
 export async function createPage(body) {
@@ -148,7 +162,7 @@ export async function createPage(body) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
   });
-  return response.json();
+  return safeJsonResponse(response);
 }
 
 export async function reactPost(body) {
@@ -157,5 +171,57 @@ export async function reactPost(body) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
   });
-  return response.json();
+  return safeJsonResponse(response);
+}
+
+/**
+ * Media studio APIs
+ */
+export async function extractAudio(url, signal) {
+  const response = await authFetch('/api/media/audio/extract', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+    signal
+  });
+  return safeJsonResponse(response);
+}
+
+export async function removeAudioSegment(audio, start, end) {
+  const response = await authFetch('/api/media/audio/remove-segment', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ audio, start, end })
+  });
+  return safeJsonResponse(response);
+}
+
+export async function getSupabaseVideos(signal) {
+  const response = await authFetch('/api/media/videos', { signal });
+  return safeJsonResponse(response);
+}
+
+export async function uploadSupabaseVideo(file) {
+  if (!file) {
+    throw new Error('Vui lòng chọn một file video để tải lên.');
+  }
+
+  const response = await authFetch('/api/media/videos/upload', {
+    method: 'POST',
+    headers: {
+      'Content-Type': file.type?.startsWith('video/') ? file.type : 'application/octet-stream',
+      'X-File-Name': encodeURIComponent(file.name || 'video.mp4')
+    },
+    body: file
+  });
+  return safeJsonResponse(response);
+}
+
+export async function mergeAudioWithVideo(audio, video) {
+  const response = await authFetch('/api/media/merge', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ audio, video, mode: 'replace' })
+  });
+  return safeJsonResponse(response);
 }

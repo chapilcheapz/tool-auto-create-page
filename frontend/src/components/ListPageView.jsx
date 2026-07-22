@@ -27,11 +27,12 @@ export default function ListPageView({
       <div className="p-6 glass-effect rounded-2xl shadow-xl flex flex-col gap-6">
         
         {/* Header Section */}
+        {/* Header Section */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[var(--border-main)] pb-4">
           <div className="flex-grow">
-            <h2 className="text-xl font-bold text-[var(--text-main)]">Danh Sách Page Trong Tài Khoản</h2>
+            <h2 className="text-xl font-bold text-[var(--text-main)]">Danh Sách Trang Cá Nhân & Fanpage</h2>
             <p className="text-xs text-[var(--text-muted)] mt-1">
-              Quản lý các trang Facebook hiện có. Tổng số trang:{' '}
+              Quản lý tất cả tài khoản cá nhân & fanpage Facebook. Tổng số:{' '}
               <span className="font-bold text-purple-400">{filteredPages.length}</span>
             </p>
           </div>
@@ -43,7 +44,7 @@ export default function ListPageView({
             </span>
             <input
               type="text"
-              placeholder="Tìm kiếm page..."
+              placeholder="Tìm kiếm tài khoản, page..."
               className="w-full bg-[var(--input-bg)] border border-[var(--input-border)] rounded-lg pl-10 pr-4 py-2 text-xs text-[var(--text-main)] focus:outline-none focus:border-[var(--text-muted)] transition-all placeholder:text-[var(--text-muted)] outline-none"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -55,7 +56,7 @@ export default function ListPageView({
         {loading && (
           <div className="min-h-[250px] flex flex-col items-center justify-center text-center">
             <RefreshCw className="animate-spin text-purple-500 mb-2" size={32} />
-            <p className="text-xs text-[var(--text-muted)]">Đang tải danh sách page...</p>
+            <p className="text-xs text-[var(--text-muted)]">Đang tải danh sách tài khoản & page...</p>
           </div>
         )}
 
@@ -65,7 +66,7 @@ export default function ListPageView({
             <div className="w-16 h-16 rounded-2xl bg-[var(--input-bg)] flex items-center justify-center mb-4 border border-[var(--border-main)]">
               <FileText className="text-[var(--text-muted)]" size={32} />
             </div>
-            <h3 className="text-sm font-semibold text-[var(--text-main)]">Chưa có danh sách Page</h3>
+            <h3 className="text-sm font-semibold text-[var(--text-main)]">Chưa có danh sách Trang / Page</h3>
             <p className="text-xs text-[var(--text-muted)] mt-1 max-w-sm leading-relaxed">
               Vui lòng cấu hình Cookie trong phần cài đặt hoặc tự động đăng nhập để hiển thị danh sách trang.
             </p>
@@ -78,9 +79,9 @@ export default function ListPageView({
             <div className="w-16 h-16 rounded-2xl bg-[var(--input-bg)] flex items-center justify-center mb-4 border border-[var(--border-main)]">
               <AlertCircle className="text-[var(--text-muted)]" size={32} />
             </div>
-            <h3 className="text-sm font-semibold text-[var(--text-main)]">Không tìm thấy Page nào</h3>
+            <h3 className="text-sm font-semibold text-[var(--text-main)]">Không tìm thấy tài khoản nào</h3>
             <p className="text-xs text-[var(--text-muted)] mt-1">
-              {searchTerm ? 'Không tìm thấy Page nào phù hợp với tìm kiếm.' : (errorMsg || 'Không tìm thấy trang nào trên tài khoản này.')}
+              {searchTerm ? 'Không tìm thấy kết quả phù hợp với tìm kiếm.' : (errorMsg || 'Không tìm thấy trang nào trên tài khoản này.')}
             </p>
           </div>
         )}
@@ -93,8 +94,8 @@ export default function ListPageView({
                 <thead>
                   <tr className="bg-[var(--active-menu-bg)] border-b border-[var(--border-main)] text-[var(--text-muted)] font-semibold text-[11px] uppercase tracking-wider">
                     <th className="py-3 px-4 w-12 text-center">#</th>
-                    <th className="py-3 px-4">Page</th>
-                    <th className="py-3 px-4">Page ID</th>
+                    <th className="py-3 px-4">Tài khoản / Page</th>
+                    <th className="py-3 px-4">ID</th>
                     <th className="py-3 px-4 text-right w-48">Thao tác</th>
                   </tr>
                 </thead>
@@ -107,16 +108,29 @@ export default function ListPageView({
                           <div className="w-8 h-8 rounded-full bg-purple-500/10 text-purple-400 font-bold flex items-center justify-center text-xs overflow-hidden shrink-0">
                             {page.avatar ? (
                               <img 
-                                src={page.avatar} 
+                                src={page.avatar || `/api/config/fb-avatar?uid=${page.id}`} 
                                 alt={page.name} 
                                 className="w-full h-full object-cover" 
                                 referrerPolicy="no-referrer"
+                                onError={(e) => {
+                                  const fallbackUrl = `/api/config/fb-avatar?uid=${page.id}`;
+                                  if (!e.target.src.includes('/api/config/fb-avatar')) {
+                                    e.target.src = fallbackUrl;
+                                  }
+                                }}
                               />
                             ) : (
                               page.name ? page.name.charAt(0).toUpperCase() : 'P'
                             )}
                           </div>
-                          <span className="font-semibold text-[var(--text-main)]">{page.name}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-[var(--text-main)]">{page.name}</span>
+                            {page.isPersonal && (
+                              <span className="px-2 py-0.5 text-[10px] font-bold rounded-md bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                                Trang cá nhân
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </td>
                       <td className="py-3 px-4 font-mono text-[var(--text-muted)] select-all">{page.id}</td>

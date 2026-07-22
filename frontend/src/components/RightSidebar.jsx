@@ -29,7 +29,7 @@ export default function RightSidebar({
         <div className="p-4 flex items-center justify-between border-b border-zinc-900">
           <div className="flex items-center gap-2">
             <ListFilter className="text-zinc-400" size={18} />
-            <h2 className="text-xs font-semibold text-white uppercase tracking-widest">Danh Sách Page</h2>
+            <h2 className="text-xs font-semibold text-white uppercase tracking-widest">Danh Sách Trang & Page</h2>
           </div>
           <button 
             onClick={onRefresh}
@@ -46,7 +46,7 @@ export default function RightSidebar({
           {loading && (
             <div className="flex-grow flex flex-col items-center justify-center p-6 text-center">
               <RefreshCw className="animate-spin text-purple-500 mb-2" size={32} />
-              <p className="text-xs text-zinc-400">Đang tải danh sách page...</p>
+              <p className="text-xs text-zinc-400">Đang tải danh sách trang...</p>
             </div>
           )}
 
@@ -67,9 +67,9 @@ export default function RightSidebar({
               <div className="w-16 h-16 rounded-2xl bg-zinc-800/50 flex items-center justify-center mb-4 border border-zinc-800">
                 <AlertCircle className="text-zinc-600" size={36} />
               </div>
-              <h3 className="text-sm font-semibold text-zinc-200 mb-1">Không tìm thấy Page nào</h3>
+              <h3 className="text-sm font-semibold text-zinc-200 mb-1">Không tìm thấy trang nào</h3>
               <p className="text-xs text-red-400 leading-relaxed">
-                {errorMsg || 'Không tìm thấy Page nào thuộc tài khoản này.'}
+                {errorMsg || 'Không tìm thấy trang nào thuộc tài khoản này.'}
               </p>
             </div>
           )}
@@ -81,24 +81,32 @@ export default function RightSidebar({
                   key={page.id}
                   onClick={() => window.open(`https://www.facebook.com/${page.id}`, '_blank')}
                   className="flex items-center gap-3 p-2 rounded-xl cursor-pointer hover:bg-white/5 hover:border-white/5 border border-transparent transition-all group"
-                  title={`Xem chi tiết Page: ${page.name}`}
+                  title={`Xem chi tiết: ${page.name}`}
                 >
                   <div className="w-8 h-8 rounded-full bg-purple-500/10 text-purple-400 font-bold flex items-center justify-center text-xs overflow-hidden shrink-0">
                     {page.avatar ? (
                       <img 
-                        src={page.avatar} 
+                        src={page.avatar || `/api/config/fb-avatar?uid=${page.id}`} 
                         alt={page.name} 
                         className="w-full h-full object-cover" 
                         referrerPolicy="no-referrer"
+                        onError={(e) => {
+                          const fallbackUrl = `/api/config/fb-avatar?uid=${page.id}`;
+                          if (!e.target.src.includes('/api/config/fb-avatar')) {
+                            e.target.src = fallbackUrl;
+                          }
+                        }}
                       />
                     ) : (
                       page.name ? page.name.charAt(0).toUpperCase() : 'P'
                     )}
                   </div>
                   <div className="flex flex-col min-w-0">
-                    <span className="font-semibold text-zinc-200 text-xs truncate group-hover:text-white transition-colors">
-                      {page.name}
-                    </span>
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="font-semibold text-zinc-200 text-xs truncate group-hover:text-white transition-colors">
+                        {page.name}
+                      </span>
+                    </div>
                     <span className="font-mono text-[10px] text-zinc-500">{page.id}</span>
                   </div>
                 </li>

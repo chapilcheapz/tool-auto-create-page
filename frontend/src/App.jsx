@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Sparkles, Menu, ListFilter, AlertCircle, RefreshCw, Sun, Moon } from 'lucide-react';
+import React, { useCallback, useState, useEffect, useRef } from 'react';
+import { Menu, Sun, Moon } from 'lucide-react';
 import * as api from './utils/api';
 import LoginView from './components/LoginView';
 import Sidebar from './components/Sidebar';
@@ -7,10 +7,11 @@ import SettingsModal from './components/SettingsModal';
 import ListPageView from './components/ListPageView';
 import CreatePageView from './components/CreatePageView';
 import ReactCampaignView from './components/ReactCampaignView';
+import VideoDownloadView from './components/VideoDownloadView';
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(!!localStorage.getItem('jwt_token'));
-  const [currentView, setView] = useState('list'); // 'list' | 'create' | 'react'
+  const [currentView, setView] = useState('list'); // 'list' | 'create' | 'react' | 'download'
   const [theme, setTheme] = useState(localStorage.getItem('theme') || 'dark');
   
   useEffect(() => {
@@ -42,23 +43,15 @@ export default function App() {
 
   // Mobile sidebar states
   const [isLeftSidebarOpen, setIsLeftSidebarOpen] = useState(false);
-  const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(false);
 
   // showToast helper
-  const showToast = (message, type = 'success') => {
+  const showToast = useCallback((message, type = 'success') => {
     const id = Date.now();
     setToasts((prev) => [...prev, { id, message, type }]);
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 3000);
-  };
-
-  // Fetch initial config and page list on auth
-  useEffect(() => {
-    if (isAuthenticated) {
-      loadConfigAndPages();
-    }
-  }, [isAuthenticated]);
+  }, []);
 
   // Auth Expired listener
   useEffect(() => {
@@ -68,23 +61,10 @@ export default function App() {
     };
     window.addEventListener('auth-expired', handleExpired);
     return () => window.removeEventListener('auth-expired', handleExpired);
-  }, []);
+  }, [showToast]);
 
-  const loadConfigAndPages = async () => {
-    try {
-      const configRes = await api.fetchConfig();
-      if (configRes.success && configRes.cookie) {
-        setCookie(configRes.cookie);
-        // Load pages list
-        fetchPagesList(configRes.cookie);
-      }
-    } catch (e) {
-      console.error('Lỗi tải cấu hình ban đầu:', e);
-    }
-  };
-
-  const fetchPagesList = async (cookieVal) => {
-    const val = cookieVal || cookie;
+  const fetchPagesList = useCallback(async (cookieVal) => {
+    const val = cookieVal;
     if (!val) return;
 
     setPagesLoading(true);
@@ -103,7 +83,26 @@ export default function App() {
     } finally {
       setPagesLoading(false);
     }
-  };
+  }, []);
+
+  const loadConfigAndPages = useCallback(async () => {
+    try {
+      const configRes = await api.fetchConfig();
+      if (configRes.success && configRes.cookie) {
+        setCookie(configRes.cookie);
+        await fetchPagesList(configRes.cookie);
+      }
+    } catch (e) {
+      console.error('Lỗi tải cấu hình ban đầu:', e);
+    }
+  }, [fetchPagesList]);
+
+  // Fetch initial config and page list on auth
+  useEffect(() => {
+    if (isAuthenticated) {
+      loadConfigAndPages();
+    }
+  }, [isAuthenticated, loadConfigAndPages]);
 
   const handleCookieChange = (newCookie) => {
     setCookie(newCookie);
@@ -116,6 +115,7 @@ export default function App() {
 
   const handleLogout = () => {
     localStorage.removeItem('jwt_token');
+    localStorage.removeItem('refresh_token');
     localStorage.removeItem('username');
     setIsAuthenticated(false);
     showToast('Đã đăng xuất hệ thống!', 'success');
@@ -273,6 +273,10 @@ export default function App() {
               showToast={showToast}
               onOpenSettings={() => setIsSettingsOpen(true)}
             />
+          )}
+
+          {currentView === 'download' && (
+            <VideoDownloadView showToast={showToast} />
           )}
         </div>
       </main>

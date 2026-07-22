@@ -1,3 +1,5 @@
+const path = require('path');
+const fs = require('fs');
 const facebookService = require('../services/facebookService');
 const campaignManager = require('../utils/campaignManager');
 
@@ -95,8 +97,46 @@ function streamCampaignLogs(req, res) {
   campaignManager.addClient(id, res);
 }
 
+/**
+ * API Đăng bài lên Trang cá nhân / Fanpage Facebook
+ */
+async function postToFacebook(req, res) {
+  const { cookie, targetId, caption, videoUrl, videoFilename } = req.body;
+  if (!cookie || !cookie.trim()) {
+    return res.status(400).json({ success: false, error: 'Vui lòng cung cấp cookie Facebook!' });
+  }
+  if (!targetId) {
+    return res.status(400).json({ success: false, error: 'Vui lòng chọn trang cá nhân hoặc fanpage!' });
+  }
+
+  // Resolve đường dẫn file video thực nếu có
+  let videoFilePath = '';
+  if (videoFilename && typeof videoFilename === 'string' && videoFilename.trim()) {
+    const downloadDir = process.env.DOWNLOAD_DIR
+      ? path.resolve(process.env.DOWNLOAD_DIR.replace(/^"|"$/g, ''))
+      : path.join(__dirname, '../../storage/downloads');
+    const safeFilename = path.basename(videoFilename.trim());
+    const resolved = path.join(downloadDir, safeFilename);
+    // Bảo mật: chỉ cho phép trong thư mục download
+    if (resolved.startsWith(downloadDir) && fs.existsSync(resolved)) {
+      videoFilePath = resolved;
+      console.log(`[postToFacebook] Tìm thấy file video: ${videoFilePath}`);
+    } else {
+      console.log(`[postToFacebook] Không tìm thấy file "${safeFilename}" trong ${downloadDir}`);
+    }
+  }
+
+  try {
+    const result = await facebookService.postToFacebook(cookie, targetId, caption, videoUrl, videoFilePath);
+    return res.json(result);
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+}
+
 module.exports = {
   fetchPages,
   createNewPage,
-  streamCampaignLogs
+  streamCampaignLogs,
+  postToFacebook
 };

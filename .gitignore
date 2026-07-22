@@ -3,6 +3,10 @@ config.json
 .DS_Store
 .env
 storage/
+cookies.txt
+*.cookies.txt
+storage/cookies/
+storage/videos/
 build/
 *.log
 .vscode/
