@@ -1,4 +1,5 @@
 const axios = require('axios');
+const ytdlpService = require('./ytdlpService');
 
 /**
  * Service xử lý phân tích và giải mã đường dẫn video từ nhiều nguồn (Facebook, TikTok, YouTube, direct MP4,...)
@@ -80,7 +81,6 @@ async function parseTikTokVideo(url) {
  */
 async function parseYouTubeVideo(url) {
   const { execFile } = require('child_process');
-  const fs = require('fs');
 
   const cleanUrl = url.trim();
   let videoId = '';
@@ -124,17 +124,14 @@ async function parseYouTubeVideo(url) {
   }
 
   // 💡 CÁCH 2: Dùng yt-dlp với cờ giả lập iOS Client bypass
-  function findBin(name) {
-    const paths = [`/opt/homebrew/bin/${name}`, `/usr/local/bin/${name}`, `/usr/bin/${name}`, name];
-    for (const p of paths) { try { if (fs.existsSync(p)) return p; } catch(e) {} }
-    return name;
-  }
-
-  const ytdlp = process.env.YTDLP_PATH || findBin('yt-dlp');
+  const ytdlp = ytdlpService.getDlpPath();
+  const javascriptRuntimeArgs = ytdlpService.buildJavaScriptRuntimeArgs(cleanUrl);
   const iosUA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1';
 
   return new Promise((resolve) => {
     const titleArgs = [
+      '--ignore-config',
+      ...javascriptRuntimeArgs,
       '--no-playlist', '--no-warnings', '--skip-download',
       '--extractor-args', 'youtube:player_client=ios,android,mweb',
       '--user-agent', iosUA,
@@ -143,6 +140,8 @@ async function parseYouTubeVideo(url) {
     ];
 
     const urlArgs = [
+      '--ignore-config',
+      ...javascriptRuntimeArgs,
       '--no-playlist', '--no-warnings',
       '--extractor-args', 'youtube:player_client=ios,android,mweb',
       '--user-agent', iosUA,

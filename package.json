@@ -8,11 +8,13 @@
     "frontend"
   ],
   "scripts": {
+    "postinstall": "node scripts/install-yt-dlp.js",
     "start": "node server.js",
     "dev:backend": "node --watch --watch-preserve-output server.js",
     "dev:frontend": "npm run dev -w frontend",
     "dev": "concurrently --kill-others-on-fail \"npm run dev:backend\" \"npm run dev:frontend\"",
-    "build:frontend": "npm run build -w frontend"
+    "build:frontend": "npm run build -w frontend",
+    "check:media-tools": "node scripts/check-media-tools.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.2",
@@ -31,7 +33,7 @@
     "concurrently": "^10.0.3"
   },
   "engines": {
-    "node": "^20.19.0 || >=22.12.0",
+    "node": ">=22.12.0",
     "npm": ">=10"
   },
   "packageManager": "npm@10.9.2"

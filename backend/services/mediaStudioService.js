@@ -262,6 +262,9 @@ function runBinary(binary, args, label, signal) {
             'OPERATION_ABORTED'
           ));
         }
+        if (error.code === 'ENOENT' || error.code === 'EACCES') {
+          return reject(new ytdlpService.MediaToolMissingError(path.basename(binary), binary));
+        }
         const detail = conciseProcessMessage(stdout, stderr, error.message);
         const timeoutText = error.killed ? ' (quá thời gian xử lý)' : '';
         return reject(new MediaStudioError(

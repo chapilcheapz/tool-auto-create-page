@@ -8,6 +8,7 @@ cookies.txt
 storage/cookies/
 storage/videos/
 build/
+vendor/bin/
 *.log
 .vscode/
 .idea/
