@@ -5,6 +5,7 @@ const cookieParser = require('cookie-parser');
 const path = require('path');
 
 const { initializeUsers } = require('./backend/services/userService');
+const { getMediaToolStatus } = require('./backend/services/ytdlpService');
 
 // Thêm error handlers toàn cục để không bao giờ bị crash im lặng
 process.on('uncaughtException', (err) => {
@@ -30,7 +31,17 @@ app.use(express.json({ limit: '10mb' }));
 
 // Public health check must be registered before the protected /api router.
 app.get('/api/status', (req, res) => {
-  res.json({ status: 'ok', time: new Date().toISOString() });
+  const mediaToolStatus = getMediaToolStatus();
+  res.status(mediaToolStatus.ready ? 200 : 503).json({
+    status: mediaToolStatus.ready ? 'ok' : 'degraded',
+    time: new Date().toISOString(),
+    mediaTools: {
+      ready: mediaToolStatus.ready,
+      missing: mediaToolStatus.tools
+        .filter(tool => !tool.available)
+        .map(tool => tool.name)
+    }
+  });
 });
 
 app.use(express.static(path.join(__dirname, 'build')));
@@ -74,6 +85,14 @@ async function startServer() {
 
   const httpServer = app.listen(PORT, '0.0.0.0', () => {
     console.log(`\n🚀 Server đang chạy tại cổng: http://0.0.0.0:${PORT}\n`);
+    const mediaToolStatus = getMediaToolStatus();
+    for (const tool of mediaToolStatus.tools) {
+      if (tool.available) {
+        console.log(`[MediaTools] ✅ ${tool.name}: ${tool.path}`);
+      } else {
+        console.warn(`[MediaTools] ❌ Thiếu ${tool.name}. Luồng tách/cắt/ghép media chưa sẵn sàng.`);
+      }
+    }
   });
   const configuredRequestTimeout = Number.parseInt(process.env.HTTP_REQUEST_TIMEOUT_MS || '', 10);
   httpServer.requestTimeout = Number.isSafeInteger(configuredRequestTimeout) && configuredRequestTimeout >= 300000

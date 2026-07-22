@@ -1,29 +1,161 @@
-const { execFile } = require('child_process');
+const { execFile, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-/**
- * Helper tìm vị trí thực tế của binary yt-dlp và ffprobe
- */
-function findBinary(name) {
-  // Ưu tiên Homebrew trước vì bin/ local có thể là Python package bị hỏng
-  const commonPaths = [
-    `/opt/homebrew/bin/${name}`,
-    `/usr/local/bin/${name}`,
-    path.join(process.env.HOME || '', 'Library/Python/3.13/bin', name),
-    path.join(process.env.HOME || '', '.local/bin', name),
-    `/usr/bin/${name}`,
-    name
-  ];
-  for (const p of commonPaths) {
-    if (fs.existsSync(p)) return p;
+const PROJECT_BIN_DIR = path.resolve(__dirname, '../../vendor/bin');
+const binaryValidationCache = new Map();
+
+class MediaToolMissingError extends Error {
+  constructor(toolName, configuredPath = '') {
+    const configuredHint = configuredPath
+      ? ` Giá trị đang cấu hình: ${configuredPath}.`
+      : '';
+    const recoveryHint = toolName === 'yt-dlp'
+      ? 'Hãy chạy lại npm install (không dùng --ignore-scripts) hoặc rebuild bằng Dockerfile mới.'
+      : 'Hãy rebuild bằng Dockerfile mới hoặc cài gói ffmpeg trên hệ điều hành của server.';
+    super(
+      `Server đang thiếu executable ${toolName}.${configuredHint} ` +
+      recoveryHint
+    );
+    this.name = 'MediaToolMissingError';
+    this.statusCode = 503;
+    this.code = 'MEDIA_TOOL_MISSING';
+    this.tool = toolName;
   }
-  return name;
 }
 
-const getDlpPath = () => process.env.YTDLP_PATH || findBinary('yt-dlp');
-const getFfprobePath = () => process.env.FFPROBE_PATH || findBinary('ffprobe');
-const getFfmpegPath = () => process.env.FFMPEG_PATH || findBinary('ffmpeg');
+class MediaDownloadError extends Error {
+  constructor(message, statusCode = 422, code = 'MEDIA_DOWNLOAD_FAILED') {
+    super(message);
+    this.name = 'MediaDownloadError';
+    this.statusCode = statusCode;
+    this.code = code;
+  }
+}
+
+function normalizeConfiguredPath(value) {
+  return String(value || '').trim().replace(/^(["'])(.*)\1$/, '$2');
+}
+
+function executableNames(name) {
+  if (process.platform !== 'win32' || path.extname(name)) return [name];
+  return [name, `${name}.exe`];
+}
+
+function isExecutableFile(candidate) {
+  if (!candidate) return false;
+  try {
+    const stat = fs.statSync(candidate);
+    if (!stat.isFile()) return false;
+    fs.accessSync(candidate, process.platform === 'win32' ? fs.constants.F_OK : fs.constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isRunnableBinary(candidate, toolName) {
+  let stat;
+  try {
+    stat = fs.statSync(candidate);
+  } catch {
+    return false;
+  }
+  const cacheKey = `${toolName}:${candidate}:${stat.size}:${stat.mtimeMs}`;
+  if (binaryValidationCache.has(cacheKey)) return binaryValidationCache.get(cacheKey);
+
+  const versionArgs = toolName === 'yt-dlp' ? ['--ignore-config', '--version'] : ['-version'];
+  const result = spawnSync(candidate, versionArgs, {
+    shell: false,
+    stdio: 'ignore',
+    timeout: 5_000,
+    windowsHide: true
+  });
+  const runnable = result.status === 0;
+  if (binaryValidationCache.size >= 100) binaryValidationCache.clear();
+  binaryValidationCache.set(cacheKey, runnable);
+  return runnable;
+}
+
+function pathCandidates(command) {
+  if (!command) return [];
+  const hasPathSeparator = command.includes('/') || command.includes('\\');
+  if (path.isAbsolute(command) || hasPathSeparator) {
+    const resolved = path.isAbsolute(command) ? command : path.resolve(process.cwd(), command);
+    return executableNames(resolved);
+  }
+
+  const pathEntries = String(process.env.PATH || '')
+    .split(path.delimiter)
+    .map(entry => entry.trim())
+    .filter(Boolean);
+  return pathEntries.flatMap(entry => executableNames(path.join(entry, command)));
+}
+
+function findBinary(name, configuredPath, bundledName = name) {
+  const configured = normalizeConfiguredPath(configuredPath);
+  const configuredIsExplicitPath = path.isAbsolute(configured) ||
+    configured.includes('/') ||
+    configured.includes('\\');
+  const homeDirectory = process.env.HOME || process.env.USERPROFILE || '';
+  const candidates = [
+    ...(configuredIsExplicitPath ? pathCandidates(configured) : []),
+    ...executableNames(path.join(PROJECT_BIN_DIR, bundledName)),
+    ...(!configuredIsExplicitPath ? pathCandidates(configured) : []),
+    ...executableNames(`/opt/homebrew/bin/${name}`),
+    ...executableNames(`/usr/local/bin/${name}`),
+    ...(homeDirectory ? executableNames(path.join(homeDirectory, '.local/bin', name)) : []),
+    ...executableNames(`/usr/bin/${name}`),
+    ...pathCandidates(name)
+  ];
+
+  const seen = new Set();
+  for (const candidate of candidates) {
+    const normalized = path.normalize(candidate);
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    if (isExecutableFile(normalized) && isRunnableBinary(normalized, name)) return normalized;
+  }
+  return null;
+}
+
+function requireBinary(name, configuredPath, bundledName = name) {
+  const resolved = findBinary(name, configuredPath, bundledName);
+  if (resolved) return resolved;
+  throw new MediaToolMissingError(name, normalizeConfiguredPath(configuredPath));
+}
+
+const getDlpPath = () => requireBinary(
+  'yt-dlp',
+  process.env.YTDLP_PATH,
+  process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp'
+);
+const getFfprobePath = () => requireBinary('ffprobe', process.env.FFPROBE_PATH);
+const getFfmpegPath = () => requireBinary('ffmpeg', process.env.FFMPEG_PATH);
+
+function getMediaToolStatus() {
+  const tools = [
+    ['yt-dlp', process.env.YTDLP_PATH, process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp'],
+    ['ffmpeg', process.env.FFMPEG_PATH, 'ffmpeg'],
+    ['ffprobe', process.env.FFPROBE_PATH, 'ffprobe']
+  ];
+  const entries = tools.map(([name, configuredPath, bundledName]) => {
+    const resolvedPath = findBinary(name, configuredPath, bundledName);
+    return { name, available: Boolean(resolvedPath), path: resolvedPath };
+  });
+  return {
+    ready: entries.every(entry => entry.available),
+    tools: entries
+  };
+}
+
+function buildJavaScriptRuntimeArgs(sourceUrl) {
+  const isYouTube = sourceUrl.includes('youtube.com') || sourceUrl.includes('youtu.be');
+  const nodeMajor = Number.parseInt(process.versions.node.split('.')[0], 10);
+  return isYouTube && nodeMajor >= 22
+    ? ['--js-runtimes', `node:${process.execPath}`]
+    : [];
+}
 
 /**
  * Tạo các tham số cookie an toàn cho yt-dlp từ biến môi trường
@@ -56,7 +188,9 @@ function buildCookieArgs() {
 function downloadWithYtDlp(sourceUrl, outputTemplate, onProgress) {
   return new Promise((resolve, reject) => {
     const ffmpegPath = getFfmpegPath();
+    const dlpPath = getDlpPath();
     const cookieArgs = buildCookieArgs();
+    const javascriptRuntimeArgs = buildJavaScriptRuntimeArgs(sourceUrl);
 
     const isYoutube = sourceUrl.includes('youtube.com') || sourceUrl.includes('youtu.be');
     const extraBypassArgs = isYoutube ? [
@@ -65,8 +199,10 @@ function downloadWithYtDlp(sourceUrl, outputTemplate, onProgress) {
     ] : [];
 
     const args = [
+      '--ignore-config',
       ...cookieArgs,
       ...extraBypassArgs,
+      ...javascriptRuntimeArgs,
       '--no-playlist',
       '--no-warnings',
       '--newline',
@@ -79,7 +215,7 @@ function downloadWithYtDlp(sourceUrl, outputTemplate, onProgress) {
       sourceUrl
     ];
 
-    const child = execFile(getDlpPath(), args, {
+    const child = execFile(dlpPath, args, {
       timeout: 1800000,
       maxBuffer: 30 * 1024 * 1024
     });
@@ -114,35 +250,46 @@ function downloadWithYtDlp(sourceUrl, outputTemplate, onProgress) {
 
       if (code !== 0) {
         if (rawMessage.includes('Sign in to confirm you’re not a bot')) {
-          return reject(new Error('YouTube bắt xác minh bot check. Hệ thống đang chuyển sang luồng giải mã Direct Stream...'));
+          return reject(new MediaDownloadError(
+            'YouTube yêu cầu xác minh. Hãy cấu hình cookies.txt rồi thử lại.',
+            422,
+            'SOURCE_AUTH_REQUIRED'
+          ));
         }
         if (
           rawMessage.includes('Could not copy Chrome cookie database') ||
           rawMessage.includes('Failed to decrypt with DPAPI') ||
           rawMessage.includes('Unable to get browser cookies')
         ) {
-          return reject(new Error('Không đọc được cookie Chrome. Hãy đóng Chrome rồi thử lại, chọn đúng profile hoặc chuyển sang cookies.txt.'));
+          return reject(new MediaDownloadError(
+            'Không đọc được cookie Chrome. Hãy đóng Chrome rồi thử lại, chọn đúng profile hoặc chuyển sang cookies.txt.',
+            422,
+            'MEDIA_COOKIE_ERROR'
+          ));
         }
-        return reject(new Error(`yt-dlp kết thúc với mã lỗi ${code}. ${rawMessage}`));
+        return reject(new MediaDownloadError(`yt-dlp kết thúc với mã lỗi ${code}. ${rawMessage}`));
       }
 
       const lines = stdoutData.split('\n').map(l => l.trim()).filter(Boolean);
       const filePath = lines[lines.length - 1];
 
       if (!filePath || !fs.existsSync(filePath)) {
-        return reject(new Error('yt-dlp không tạo được file video.'));
+        return reject(new MediaDownloadError('yt-dlp không tạo được file video.', 502));
       }
 
       const fileStat = fs.statSync(filePath);
       if (!fileStat.isFile() || fileStat.size <= 0) {
-        return reject(new Error('File video tải về không hợp lệ (dung lượng 0 bytes).'));
+        return reject(new MediaDownloadError('File video tải về không hợp lệ (dung lượng 0 bytes).', 502));
       }
 
       resolve(filePath);
     });
 
     child.on('error', (err) => {
-      reject(new Error(`yt-dlp lỗi: ${err.message}`));
+      if (err.code === 'ENOENT' || err.code === 'EACCES') {
+        return reject(new MediaToolMissingError('yt-dlp', dlpPath));
+      }
+      reject(new MediaDownloadError(`yt-dlp lỗi: ${err.message}`, 502));
     });
   });
 }
@@ -166,7 +313,9 @@ function downloadAudioWithYtDlp(sourceUrl, outputTemplate, onProgress, options =
     }
 
     const ffmpegPath = getFfmpegPath();
+    const dlpPath = getDlpPath();
     const cookieArgs = buildCookieArgs();
+    const javascriptRuntimeArgs = buildJavaScriptRuntimeArgs(sourceUrl);
     const isYoutube = sourceUrl.includes('youtube.com') || sourceUrl.includes('youtu.be');
     const extraBypassArgs = isYoutube ? [
       '--extractor-args', 'youtube:player_client=ios,android,mweb',
@@ -178,8 +327,10 @@ function downloadAudioWithYtDlp(sourceUrl, outputTemplate, onProgress, options =
       : '250M';
 
     const args = [
+      '--ignore-config',
       ...cookieArgs,
       ...extraBypassArgs,
+      ...javascriptRuntimeArgs,
       '--no-playlist',
       '--no-warnings',
       '--newline',
@@ -198,7 +349,7 @@ function downloadAudioWithYtDlp(sourceUrl, outputTemplate, onProgress, options =
       sourceUrl
     ];
 
-    const child = execFile(getDlpPath(), args, {
+    const child = execFile(dlpPath, args, {
       timeout: 1800000,
       maxBuffer: 30 * 1024 * 1024,
       signal
@@ -232,27 +383,37 @@ function downloadAudioWithYtDlp(sourceUrl, outputTemplate, onProgress, options =
       const rawMessage = (stderrData || stdoutData || '').trim();
       if (code !== 0) {
         if (rawMessage.includes('Sign in to confirm you’re not a bot')) {
-          return reject(new Error('YouTube yêu cầu xác minh. Hãy cấu hình cookies.txt rồi thử lại.'));
+          return reject(new MediaDownloadError(
+            'YouTube yêu cầu xác minh. Hãy cấu hình cookies.txt rồi thử lại.',
+            422,
+            'SOURCE_AUTH_REQUIRED'
+          ));
         }
         if (
           rawMessage.includes('Could not copy Chrome cookie database') ||
           rawMessage.includes('Failed to decrypt with DPAPI') ||
           rawMessage.includes('Unable to get browser cookies')
         ) {
-          return reject(new Error('Không đọc được cookie trình duyệt. Hãy dùng cookies.txt hoặc kiểm tra lại profile.'));
+          return reject(new MediaDownloadError(
+            'Không đọc được cookie trình duyệt. Hãy dùng cookies.txt hoặc kiểm tra lại profile.',
+            422,
+            'MEDIA_COOKIE_ERROR'
+          ));
         }
-        return reject(new Error(`Không thể tách âm thanh. ${rawMessage || `yt-dlp kết thúc với mã ${code}`}`));
+        return reject(new MediaDownloadError(
+          `Không thể tách âm thanh. ${rawMessage || `yt-dlp kết thúc với mã ${code}`}`
+        ));
       }
 
       const lines = stdoutData.split('\n').map(line => line.trim()).filter(Boolean);
       const filePath = lines[lines.length - 1];
       if (!filePath || !fs.existsSync(filePath)) {
-        return reject(new Error('yt-dlp không tạo được file MP3.'));
+        return reject(new MediaDownloadError('yt-dlp không tạo được file MP3.', 502));
       }
 
       const stat = fs.statSync(filePath);
       if (!stat.isFile() || stat.size <= 0) {
-        return reject(new Error('File MP3 được tạo không hợp lệ.'));
+        return reject(new MediaDownloadError('File MP3 được tạo không hợp lệ.', 502));
       }
       resolve(filePath);
     });
@@ -261,7 +422,10 @@ function downloadAudioWithYtDlp(sourceUrl, outputTemplate, onProgress, options =
       if (signal?.aborted || error.name === 'AbortError' || error.code === 'ABORT_ERR') {
         return reject(abortError());
       }
-      reject(new Error(`Không thể chạy yt-dlp: ${error.message}`));
+      if (error.code === 'ENOENT' || error.code === 'EACCES') {
+        return reject(new MediaToolMissingError('yt-dlp', dlpPath));
+      }
+      reject(new MediaDownloadError(`Không thể chạy yt-dlp: ${error.message}`, 502));
     });
   });
 }
@@ -317,11 +481,16 @@ function verifyWithFfprobe(filePath) {
 }
 
 module.exports = {
+  MediaDownloadError,
+  MediaToolMissingError,
   buildCookieArgs,
+  buildJavaScriptRuntimeArgs,
   downloadWithYtDlp,
   downloadAudioWithYtDlp,
   verifyHeaderNotHtml,
   verifyWithFfprobe,
+  findBinary,
+  getMediaToolStatus,
   getDlpPath,
   getFfprobePath,
   getFfmpegPath
