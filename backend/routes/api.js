@@ -24,6 +24,11 @@ router.use(authMiddleware);
 // Config routes
 router.get('/config', configController.getConfig);
 router.get('/config/diagnose-cookies', configController.diagnoseCookies);
+router.get('/config/ytdlp-cookies/status', configController.getYtdlpCookiesStatus);
+router.post('/config/ytdlp-cookies/upload', configController.uploadYtdlpCookies);
+router.get('/config/platform-cookies/:platform/status', configController.getPlatformCookieStatus);
+router.post('/config/platform-cookies/:platform/upload', configController.uploadPlatformCookies);
+router.get('/config/platform-cookies/:platform/content', configController.getPlatformCookieContent);
 router.post('/config', configController.saveConfig);
 router.post('/config/fb-login', configController.fbLogin);
 router.get('/config/fb-verification-status', configController.getVerificationStatus);
@@ -47,6 +52,8 @@ router.get('/media/videos', mediaController.listVideos);
 // MEDIA_MAX_UPLOAD_BYTES without buffering a large video in Node.js memory.
 router.post('/media/videos/upload', mediaController.uploadVideo);
 router.post('/media/merge', mediaController.mergeMedia);
+router.post('/media/persist-remote', mediaController.persistRemoteMedia);
+router.post('/media/delete', mediaController.deleteMedia);
 
 // Change password
 router.post('/auth/change-password', authController.changePassword);

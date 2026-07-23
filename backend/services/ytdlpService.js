@@ -1,8 +1,15 @@
 const { execFile, spawnSync } = require('child_process');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const PROJECT_BIN_DIR = path.resolve(__dirname, '../../vendor/bin');
+
+// Đường dẫn file cookies tạm được decode từ YTDLP_COOKIES_BASE64
+let _decodedCookiesFilePath = null;
+// Cookie riêng cho từng nền tảng (upload thủ công qua UI)
+let _youtubeCookiesFilePath = null;
+let _tiktokCookiesFilePath = null;
 const binaryValidationCache = new Map();
 
 class MediaToolMissingError extends Error {
@@ -158,25 +165,194 @@ function buildJavaScriptRuntimeArgs(sourceUrl) {
 }
 
 /**
- * Tạo các tham số cookie an toàn cho yt-dlp từ biến môi trường
- * Mặc định 'none': An toàn tuyệt đối, không đụng đến trình duyệt cá nhân hay Keychain của máy
+ * Decode YTDLP_COOKIES_BASE64 ra file tạm và trả về đường dẫn.
+ * File được tạo một lần rồi cache; gọi lại sẽ trả về cùng đường dẫn.
  */
-function buildCookieArgs() {
+function decodeBase64CookiesToFile() {
+  if (_decodedCookiesFilePath && fs.existsSync(_decodedCookiesFilePath)) {
+    return _decodedCookiesFilePath;
+  }
+
+  const base64Content = (process.env.YTDLP_COOKIES_BASE64 || '').trim();
+  if (!base64Content) return null;
+
+  try {
+    const decoded = Buffer.from(base64Content, 'base64').toString('utf-8');
+    if (!decoded.includes('# Netscape HTTP Cookie File') && !decoded.includes('\t')) {
+      console.warn('[yt-dlp] YTDLP_COOKIES_BASE64 không có vẻ là file cookies Netscape hợp lệ.');
+    }
+    const tmpPath = path.join(os.tmpdir(), `ytdlp-cookies-${process.pid}.txt`);
+    fs.writeFileSync(tmpPath, decoded, { mode: 0o600 });
+    _decodedCookiesFilePath = tmpPath;
+    console.log('[yt-dlp] Đã decode YTDLP_COOKIES_BASE64 → ' + tmpPath);
+    return tmpPath;
+  } catch (err) {
+    console.error('[yt-dlp] Không thể decode YTDLP_COOKIES_BASE64:', err.message);
+    return null;
+  }
+}
+
+/**
+ * Ghi nội dung cookies.txt mới vào biến cache (dùng sau khi upload qua API).
+ * Nội dung sẽ được ghi ra file tạm để yt-dlp có thể đọc ngay.
+ */
+function writeCookiesToTempFile(content) {
+  const tmpPath = path.join(os.tmpdir(), `ytdlp-cookies-${process.pid}.txt`);
+  fs.writeFileSync(tmpPath, content, { mode: 0o600 });
+  _decodedCookiesFilePath = tmpPath;
+  return tmpPath;
+}
+
+/**
+ * Trả về trạng thái cấu hình cookies hiện tại để hiển thị trên UI.
+ */
+function getCookiesStatus() {
+  const mode = process.env.YTDLP_COOKIE_MODE || 'none';
+  const hasBase64 = Boolean((process.env.YTDLP_COOKIES_BASE64 || '').trim());
+  const explicitFile = (process.env.YTDLP_COOKIES_FILE || '').trim();
+  const tempFileExists = Boolean(_decodedCookiesFilePath && fs.existsSync(_decodedCookiesFilePath));
+
+  let active = false;
+  let source = 'none';
+
+  if (mode === 'file') {
+    if (explicitFile && fs.existsSync(explicitFile)) {
+      active = true; source = 'file';
+    } else if (tempFileExists) {
+      active = true; source = 'base64';
+    } else if (hasBase64) {
+      // Chưa decode — thử decode ngay
+      const f = decodeBase64CookiesToFile();
+      active = Boolean(f); source = active ? 'base64' : 'none';
+    }
+  } else if (mode === 'browser') {
+    active = true; source = 'browser';
+  } else if (hasBase64) {
+    // mode=none nhưng có base64 — gợi ý người dùng bật mode=file
+    source = 'base64_inactive';
+  }
+
+  return { mode, active, source, hasBase64, tempFileExists };
+}
+
+/**
+ * Chuyển đổi raw cookie string (name=value; name=value) sang định dạng Netscape cookies.txt
+ */
+function rawCookieStringToNetscape(cookieStr, domain) {
+  const cookies = cookieStr.split(';').map(c => c.trim()).filter(Boolean);
+  const lines = ['# Netscape HTTP Cookie File', `# Generated for ${domain}`];
+  cookies.forEach(cookie => {
+    const eqIdx = cookie.indexOf('=');
+    if (eqIdx > 0) {
+      const name = cookie.substring(0, eqIdx).trim();
+      const value = cookie.substring(eqIdx + 1).trim();
+      // domain\tincludeSubdomains\tpath\tsecure\texpiry\tname\tvalue
+      lines.push(`${domain}\tTRUE\t/\tTRUE\t0\t${name}\t${value}`);
+    }
+  });
+  return lines.join('\n');
+}
+
+/**
+ * Lưu cookie thủ công (raw string hoặc Netscape) vào file tạm cho từng nền tảng.
+ * platform: 'youtube' | 'tiktok'
+ */
+function writePlatformCookiesToFile(content, platform) {
+  const tmpPath = path.join(os.tmpdir(), `ytdlp-${platform}-cookies-${process.pid}.txt`);
+  const trimmed = content.trim();
+
+  // Phát hiện định dạng: Netscape có header hoặc tab-separated, raw string thì không
+  const isNetscape = trimmed.includes('# Netscape HTTP Cookie File') ||
+    trimmed.split('\n').some(line => !line.startsWith('#') && line.includes('\t'));
+
+  let fileContent = trimmed;
+  if (!isNetscape) {
+    const domainMap = { youtube: '.youtube.com', tiktok: '.tiktok.com' };
+    fileContent = rawCookieStringToNetscape(trimmed, domainMap[platform] || `.${platform}.com`);
+  }
+
+  fs.writeFileSync(tmpPath, fileContent, { mode: 0o600 });
+
+  if (platform === 'youtube') {
+    _youtubeCookiesFilePath = tmpPath;
+  } else if (platform === 'tiktok') {
+    _tiktokCookiesFilePath = tmpPath;
+  }
+
+  const lineCount = fileContent.split('\n').filter(l => l.trim() && !l.startsWith('#')).length;
+  console.log(`[yt-dlp] Cookies ${platform} đã được lưu → ${tmpPath} (${lineCount} dòng)`);
+  return { tmpPath, lineCount };
+}
+
+/**
+ * Lấy trạng thái cookie của từng nền tảng.
+ * platform: 'youtube' | 'tiktok'
+ */
+function getPlatformCookiesStatus(platform) {
+  const filePath = platform === 'youtube' ? _youtubeCookiesFilePath : _tiktokCookiesFilePath;
+  const active = Boolean(filePath && fs.existsSync(filePath));
+  let lineCount = 0;
+  if (active) {
+    try {
+      const content = fs.readFileSync(filePath, 'utf-8');
+      lineCount = content.split('\n').filter(l => l.trim() && !l.startsWith('#')).length;
+    } catch {}
+  }
+  return { platform, active, lineCount };
+}
+
+/**
+ * Tạo các tham số cookie an toàn cho yt-dlp từ biến môi trường.
+ * Ưu tiên: platform-specific → YTDLP_COOKIES_FILE → YTDLP_COOKIES_BASE64 → browser → none
+ * @param {string} sourceUrl - URL nguồn để xác định platform
+ */
+function buildCookieArgs(sourceUrl = '') {
+  // Ưu tiên 0: Cookie riêng theo nền tảng (upload thủ công qua tab YT & TikTok)
+  if (sourceUrl) {
+    const isYouTube = sourceUrl.includes('youtube.com') || sourceUrl.includes('youtu.be');
+    const isTikTok = sourceUrl.includes('tiktok.com');
+
+    if (isYouTube && _youtubeCookiesFilePath && fs.existsSync(_youtubeCookiesFilePath)) {
+      return ['--cookies', _youtubeCookiesFilePath];
+    }
+    if (isTikTok && _tiktokCookiesFilePath && fs.existsSync(_tiktokCookiesFilePath)) {
+      return ['--cookies', _tiktokCookiesFilePath];
+    }
+  }
+
   const mode = process.env.YTDLP_COOKIE_MODE || 'none';
   const browser = process.env.YTDLP_BROWSER || 'chrome';
   const profile = process.env.YTDLP_BROWSER_PROFILE?.trim();
-  const cookiesFile = process.env.YTDLP_COOKIES_FILE?.trim();
+  const explicitFile = (process.env.YTDLP_COOKIES_FILE || '').trim();
 
   if (mode === 'file') {
-    if (!cookiesFile) {
-      throw new Error('YTDLP_COOKIES_FILE chưa được cấu hình');
+    // Ưu tiên 1: File được chỉ định rõ ràng
+    if (explicitFile) {
+      if (!fs.existsSync(explicitFile)) {
+        throw new Error(`YTDLP_COOKIES_FILE không tồn tại: ${explicitFile}`);
+      }
+      return ['--cookies', explicitFile];
     }
-    return ['--cookies', cookiesFile];
+    // Ưu tiên 2: Decode từ Base64 env var
+    const base64File = decodeBase64CookiesToFile();
+    if (base64File) {
+      return ['--cookies', base64File];
+    }
+    // Ưu tiên 3: File đã upload qua API còn trong cache
+    if (_decodedCookiesFilePath && fs.existsSync(_decodedCookiesFilePath)) {
+      return ['--cookies', _decodedCookiesFilePath];
+    }
+    throw new Error('YTDLP_COOKIE_MODE=file nhưng chưa có cookies. Hãy cấu hình YTDLP_COOKIES_FILE hoặc YTDLP_COOKIES_BASE64.');
   }
 
   if (mode === 'browser') {
     const browserValue = profile ? `${browser}:${profile}` : browser;
     return ['--cookies-from-browser', browserValue];
+  }
+
+  // mode === 'none': Kiểm tra có file temp từ upload API không
+  if (_decodedCookiesFilePath && fs.existsSync(_decodedCookiesFilePath)) {
+    return ['--cookies', _decodedCookiesFilePath];
   }
 
   return [];
@@ -189,7 +365,7 @@ function downloadWithYtDlp(sourceUrl, outputTemplate, onProgress) {
   return new Promise((resolve, reject) => {
     const ffmpegPath = getFfmpegPath();
     const dlpPath = getDlpPath();
-    const cookieArgs = buildCookieArgs();
+    const cookieArgs = buildCookieArgs(sourceUrl);
     const javascriptRuntimeArgs = buildJavaScriptRuntimeArgs(sourceUrl);
 
     const isYoutube = sourceUrl.includes('youtube.com') || sourceUrl.includes('youtu.be');
@@ -314,7 +490,7 @@ function downloadAudioWithYtDlp(sourceUrl, outputTemplate, onProgress, options =
 
     const ffmpegPath = getFfmpegPath();
     const dlpPath = getDlpPath();
-    const cookieArgs = buildCookieArgs();
+    const cookieArgs = buildCookieArgs(sourceUrl);
     const javascriptRuntimeArgs = buildJavaScriptRuntimeArgs(sourceUrl);
     const isYoutube = sourceUrl.includes('youtube.com') || sourceUrl.includes('youtu.be');
     const extraBypassArgs = isYoutube ? [
@@ -493,5 +669,10 @@ module.exports = {
   getMediaToolStatus,
   getDlpPath,
   getFfprobePath,
-  getFfmpegPath
+  getFfmpegPath,
+  getCookiesStatus,
+  writeCookiesToTempFile,
+  decodeBase64CookiesToFile,
+  writePlatformCookiesToFile,
+  getPlatformCookiesStatus
 };

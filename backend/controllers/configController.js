@@ -8,6 +8,16 @@ const {
   getFbAvatarService,
   diagnoseCookiesService
 } = require('../services/facebookAuthService');
+const {
+  getCookiesStatus,
+  writeCookiesToTempFile,
+  writePlatformCookiesToFile,
+  getPlatformCookiesStatus
+} = require('../services/ytdlpService');
+const {
+  savePlatformCookie,
+  loadPlatformCookie
+} = require('../services/platformCookieService');
 
 async function getConfig(req, res) {
   try {
@@ -175,6 +185,115 @@ async function diagnoseCookies(req, res) {
   }
 }
 
+async function getYtdlpCookiesStatus(req, res) {
+  try {
+    const status = getCookiesStatus();
+    return res.json({ success: true, ...status });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+}
+
+async function uploadYtdlpCookies(req, res) {
+  try {
+    const content = req.body?.content;
+    if (!content || typeof content !== 'string' || !content.trim()) {
+      return res.status(400).json({ success: false, error: 'Nội dung cookies.txt không được để trống.' });
+    }
+
+    const trimmed = content.trim();
+    // Kiểm tra định dạng Netscape cookie (hữ cị bản)
+    const hasNetscapeHeader = trimmed.includes('# Netscape HTTP Cookie File');
+    const hasTabs = trimmed.split('\n').some(line => !line.startsWith('#') && line.includes('\t'));
+    if (!hasNetscapeHeader && !hasTabs) {
+      return res.status(400).json({
+        success: false,
+        error: 'File không có vẻ là cookies.txt hợp lệ (thiếu header Netscape hoặc dạng TSV). Hãy export lại bằng extension đúng.'
+      });
+    }
+
+    const tmpPath = writeCookiesToTempFile(trimmed);
+    console.log('[yt-dlp] Cookies đã được upload qua API →', tmpPath);
+
+    // Tự động đặt mode=file trong runtime nếu chưa cài
+    if (!process.env.YTDLP_COOKIE_MODE || process.env.YTDLP_COOKIE_MODE === 'none') {
+      process.env.YTDLP_COOKIE_MODE = 'file';
+    }
+
+    const lineCount = trimmed.split('\n').filter(l => l.trim() && !l.startsWith('#')).length;
+    return res.json({
+      success: true,
+      message: `Đã tải lên ${lineCount} cookie(s) thành công. Sẽ được dùng ngay cho yt-dlp.`,
+      lineCount
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+}
+
+async function uploadPlatformCookies(req, res) {
+  try {
+    const { platform } = req.params;
+    if (!['youtube', 'tiktok'].includes(platform)) {
+      return res.status(400).json({ success: false, error: 'Nền tảng không hợp lệ. Chỉ hỗ trợ: youtube, tiktok.' });
+    }
+
+    const content = req.body?.content;
+    if (!content || typeof content !== 'string' || !content.trim()) {
+      return res.status(400).json({ success: false, error: 'Nội dung cookie không được để trống.' });
+    }
+
+    // Lưu lên Supabase VÀ ghi temp file (sử dụng service mới)
+    const result = await savePlatformCookie(platform, content.trim());
+    const platformName = platform === 'youtube' ? 'YouTube' : 'TikTok';
+    return res.json({
+      success: true,
+      message: `Đã lưu ${result.lineCount} cookie(s) cho ${platformName} thành công! (${result.source === 'supabase' ? 'đã lưu vào Supabase' : 'lưu trong bộ nhớ'})`,
+      lineCount: result.lineCount,
+      source: result.source
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+}
+
+async function getPlatformCookieStatus(req, res) {
+  try {
+    const { platform } = req.params;
+    if (!['youtube', 'tiktok'].includes(platform)) {
+      return res.status(400).json({ success: false, error: 'Nền tảng không hợp lệ.' });
+    }
+    const status = getPlatformCookiesStatus(platform);
+    
+    // Kiểm tra thêm trạng thái lưu trên Supabase
+    let inSupabase = false;
+    try {
+      const dbContent = await loadPlatformCookie(platform);
+      inSupabase = Boolean(dbContent && dbContent.trim());
+    } catch {}
+
+    return res.json({ success: true, ...status, inSupabase });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+}
+
+/**
+ * Trả về nội dung cookie đã lưu của một nền tảng (dùng để hiển thị lại trong UI).
+ */
+async function getPlatformCookieContent(req, res) {
+  try {
+    const { platform } = req.params;
+    if (!['youtube', 'tiktok'].includes(platform)) {
+      return res.status(400).json({ success: false, error: 'Nền tảng không hợp lệ.' });
+    }
+    const content = await loadPlatformCookie(platform);
+    return res.json({ success: true, platform, content: content || '' });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+}
+
 module.exports = {
   getConfig,
   saveConfig,
@@ -185,4 +304,9 @@ module.exports = {
   handleVerificationClick,
   getFbAvatar,
   diagnoseCookies,
+  getYtdlpCookiesStatus,
+  uploadYtdlpCookies,
+  uploadPlatformCookies,
+  getPlatformCookieStatus,
+  getPlatformCookieContent
 };

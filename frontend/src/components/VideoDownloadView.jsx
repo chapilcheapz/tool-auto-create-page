@@ -21,7 +21,9 @@ import {
   Sparkles,
   Upload,
   Video,
-  X
+  X,
+  CloudUpload,
+  Trash2
 } from 'lucide-react';
 import * as api from '../utils/api';
 
@@ -210,6 +212,79 @@ export default function VideoDownloadView({ showToast }) {
   const [mergeWarning, setMergeWarning] = useState('');
   const [mergedVideo, setMergedVideo] = useState(null);
 
+  const [persistingAudio, setPersistingAudio] = useState(false);
+  const [persistingVideo, setPersistingVideo] = useState(false);
+
+  const handlePersistAudio = async () => {
+    if (!audioAsset || audioAsset.storageProvider !== 'local') return;
+    setPersistingAudio(true);
+    try {
+      const res = await api.persistRemoteMedia(audioAsset.localFileName, 'audio');
+      if (res.success && res.asset) {
+        setAudioAsset(res.asset);
+        if (originalAudioAsset && originalAudioAsset.localFileName === audioAsset.localFileName) {
+          setOriginalAudioAsset(res.asset);
+        }
+        if (showToast) showToast('Đã tải âm thanh lên Supabase thành công!', 'success');
+      } else {
+        throw new Error(res.error || 'Lưu thất bại.');
+      }
+    } catch (err) {
+      if (showToast) showToast(err.message || 'Lỗi khi tải lên Supabase.', 'error');
+    } finally {
+      setPersistingAudio(false);
+    }
+  };
+
+  const handlePersistVideo = async () => {
+    if (!selectedVideo || selectedVideo.storageProvider !== 'local') return;
+    setPersistingVideo(true);
+    try {
+      const res = await api.persistRemoteMedia(selectedVideo.localFileName, 'video');
+      if (res.success && res.asset) {
+        setSelectedVideo(res.asset);
+        setVideos((current) => [
+          res.asset,
+          ...current.filter((item) => getAssetKey(item) !== getAssetKey(selectedVideo))
+        ]);
+        if (showToast) showToast('Đã tải video lên Supabase thành công!', 'success');
+      } else {
+        throw new Error(res.error || 'Lưu thất bại.');
+      }
+    } catch (err) {
+      if (showToast) showToast(err.message || 'Lỗi khi tải lên Supabase.', 'error');
+    } finally {
+      setPersistingVideo(false);
+    }
+  };
+
+  const handleDeleteVideo = async (video) => {
+    if (!video) return;
+    const isLocal = video.storageProvider === 'local';
+    const locationName = isLocal ? 'bộ nhớ tạm của server' : 'Supabase Cloud';
+    const confirmed = window.confirm(`Bạn có chắc chắn muốn xóa video "${getAssetName(video)}" khỏi ${locationName}?`);
+    if (!confirmed) return;
+
+    try {
+      const payload = isLocal
+        ? { storageProvider: 'local', localFileName: video.localFileName }
+        : { storageProvider: 'supabase', storagePath: getAssetPath(video) };
+
+      const res = await api.deleteMedia(payload);
+      if (res.success) {
+        if (selectedVideo && getAssetKey(selectedVideo) === getAssetKey(video)) {
+          setSelectedVideo(null);
+        }
+        setVideos((current) => current.filter((item) => getAssetKey(item) !== getAssetKey(video)));
+        if (showToast) showToast(`Đã xóa video khỏi ${isLocal ? 'server' : 'Supabase'} thành công!`, 'success');
+      } else {
+        throw new Error(res.error || 'Xoá thất bại.');
+      }
+    } catch (err) {
+      if (showToast) showToast(err.message || `Lỗi khi xóa video khỏi ${isLocal ? 'server' : 'Supabase'}.`, 'error');
+    }
+  };
+
   const audioRef = useRef(null);
   const fileInputRef = useRef(null);
   const extractSequenceRef = useRef(0);
@@ -319,8 +394,21 @@ export default function VideoDownloadView({ showToast }) {
 
       setAudioAsset(result.audio);
       setOriginalAudioAsset(result.audio);
+      if (result.video) {
+        setSelectedVideo(result.video);
+        setVideos((current) => [
+          result.video,
+          ...current.filter((item) => getAssetKey(item) !== getAssetKey(result.video))
+        ]);
+      }
       setExtractWarning(result.warning || '');
-      if (showToast) showToast('Đã trích xuất âm thanh thành công!', 'success');
+      if (showToast) {
+        if (result.video) {
+          showToast('Đã trích xuất thành công âm thanh và video không nhạc!', 'success');
+        } else {
+          showToast('Đã trích xuất âm thanh thành công!', 'success');
+        }
+      }
     } catch (error) {
       if (error?.name === 'AbortError' || requestId !== extractSequenceRef.current) return;
       const message = error.message || 'Không thể trích xuất âm thanh từ liên kết này.';
@@ -521,7 +609,7 @@ export default function VideoDownloadView({ showToast }) {
     try {
       const result = await api.uploadSupabaseVideo(file);
       if (!result?.success || !result.video) {
-        throw new Error(result?.error || 'Không thể tải video lên Supabase.');
+        throw new Error(result?.error || 'Không thể tải video lên.');
       }
 
       const uploaded = result.video;
@@ -529,9 +617,9 @@ export default function VideoDownloadView({ showToast }) {
       setSelectedVideo(uploaded);
       setMergedVideo(null);
       setVideoWarning(result.warning || '');
-      if (showToast) showToast(`Đã thêm ${getAssetName(uploaded)} và tự động chọn video.`, 'success');
+      if (showToast) showToast(`Đã tải lên ${getAssetName(uploaded)} thành công và tự động chọn video.`, 'success');
     } catch (error) {
-      const message = error.message || 'Không thể tải video lên Supabase.';
+      const message = error.message || 'Không thể tải video lên.';
       setVideoError(message);
       if (showToast) showToast(message, 'error');
     } finally {
@@ -747,11 +835,26 @@ export default function VideoDownloadView({ showToast }) {
                   </div>
 
                   <div className="flex flex-wrap gap-2">
+                    {audioAsset?.storageProvider === 'local' && (
+                      <button
+                        type="button"
+                        onClick={handlePersistAudio}
+                        disabled={persistingAudio || editingAudio}
+                        className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-3.5 py-2.5 text-xs font-bold text-white transition hover:bg-violet-500 disabled:opacity-50"
+                      >
+                        {persistingAudio ? (
+                          <Loader2 className="animate-spin" size={15} />
+                        ) : (
+                          <CloudUpload size={15} />
+                        )}
+                        Lưu Supabase
+                      </button>
+                    )}
                     {isEditedAudio && (
                       <button
                         type="button"
                         onClick={restoreOriginalAudio}
-                        disabled={editingAudio}
+                        disabled={editingAudio || persistingAudio}
                         className="inline-flex items-center gap-2 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3.5 py-2.5 text-xs font-bold text-amber-400 transition hover:bg-amber-500/15 disabled:opacity-50"
                       >
                         <RotateCcw size={15} /> Khôi phục bản gốc
@@ -760,6 +863,7 @@ export default function VideoDownloadView({ showToast }) {
                     <button
                       type="button"
                       onClick={() => setEditorOpen((current) => !current)}
+                      disabled={persistingAudio}
                       className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2.5 text-xs font-bold transition ${
                         editorOpen
                           ? 'bg-zinc-600 text-white hover:bg-zinc-500'
@@ -980,7 +1084,7 @@ export default function VideoDownloadView({ showToast }) {
                 className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-xs font-bold text-white transition hover:bg-indigo-500 disabled:opacity-50"
               >
                 {uploadingVideo ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
-                {uploadingVideo ? `Đang tải ${uploadName || 'video'}...` : 'Tải video lên Supabase'}
+                {uploadingVideo ? `Đang tải ${uploadName || 'video'}...` : 'Tải video lên'}
               </button>
             </div>
           </div>
@@ -1022,7 +1126,20 @@ export default function VideoDownloadView({ showToast }) {
                       {selected ? <CheckCircle2 size={20} /> : <Video size={20} />}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <h3 className="truncate text-xs font-bold text-[var(--text-main)]" title={getAssetName(video)}>{getAssetName(video)}</h3>
+                      <div className="flex items-center justify-between gap-2">
+                        <h3 className="truncate text-xs font-bold text-[var(--text-main)]" title={getAssetName(video)}>{getAssetName(video)}</h3>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteVideo(video);
+                          }}
+                          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-rose-500/10 hover:text-rose-400"
+                          title={video.storageProvider === 'local' ? "Xóa video khỏi server" : "Xóa video khỏi Supabase"}
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
                       <p className="mt-1 truncate text-[10px] text-[var(--text-muted)]">
                         {formatBytes(video.size || video.fileSize || video.metadata?.size)}
                       </p>
@@ -1038,19 +1155,56 @@ export default function VideoDownloadView({ showToast }) {
 
           {selectedVideo && (
             <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.05] p-4">
-              <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="mb-3 flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">Video đã chọn</span>
                   <h3 className="mt-1 truncate text-sm font-bold text-[var(--text-main)]">{getAssetName(selectedVideo)}</h3>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => selectVideo(null)}
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-rose-500/10 hover:text-rose-400"
-                  title="Bỏ chọn video"
-                >
-                  <X size={16} />
-                </button>
+                <div className="flex items-center gap-2">
+                  {selectedVideo.storageProvider === 'local' ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={handlePersistVideo}
+                        disabled={persistingVideo}
+                        className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-indigo-500 disabled:opacity-50"
+                      >
+                        {persistingVideo ? (
+                          <Loader2 className="animate-spin" size={13} />
+                        ) : (
+                          <CloudUpload size={13} />
+                        )}
+                        Lưu Supabase
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteVideo(selectedVideo)}
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-rose-500/25 bg-rose-500/10 px-3 py-1.5 text-xs font-bold text-rose-400 transition hover:bg-rose-500/15"
+                      >
+                        <Trash2 size={13} />
+                        Xóa Server
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteVideo(selectedVideo)}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-rose-500/25 bg-rose-500/10 px-3 py-1.5 text-xs font-bold text-rose-400 transition hover:bg-rose-500/15"
+                    >
+                      <Trash2 size={13} />
+                      Xóa Supabase
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => selectVideo(null)}
+                    disabled={persistingVideo}
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-rose-500/10 hover:text-rose-400"
+                    title="Bỏ chọn video"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
               </div>
               {getAssetUrl(selectedVideo) && (
                 <video

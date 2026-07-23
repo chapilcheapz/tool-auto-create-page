@@ -5,7 +5,11 @@ const cookieParser = require('cookie-parser');
 const path = require('path');
 
 const { initializeUsers } = require('./backend/services/userService');
-const { getMediaToolStatus } = require('./backend/services/ytdlpService');
+const { getMediaToolStatus, writePlatformCookiesToFile } = require('./backend/services/ytdlpService');
+const { setWriteFn, initPlatformCookies } = require('./backend/services/platformCookieService');
+
+// Inject hàm ghi file vào platformCookieService (tránh circular dependency)
+setWriteFn(writePlatformCookiesToFile);
 
 // Thêm error handlers toàn cục để không bao giờ bị crash im lặng
 process.on('uncaughtException', (err) => {
@@ -83,6 +87,11 @@ async function startServer() {
     // Bỏ qua lỗi khởi tạo để tiếp tục chạy server
   }
 
+  // Load cookies YouTube & TikTok từ Supabase vào temp files
+  try {
+    await initPlatformCookies();
+  } catch {}
+
   const httpServer = app.listen(PORT, '0.0.0.0', () => {
     console.log(`\n🚀 Server đang chạy tại cổng: http://0.0.0.0:${PORT}\n`);
     const mediaToolStatus = getMediaToolStatus();
@@ -100,4 +109,5 @@ async function startServer() {
     : 30 * 60 * 1000;
 }
 
+// Trigger restart to refresh Supabase connection v8
 startServer();
