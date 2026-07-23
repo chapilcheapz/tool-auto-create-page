@@ -341,6 +341,39 @@ async function extractAudioFromUrl(sourceUrl, workspace, onProgress, signal) {
   return { filePath: outputPath, probe, sourceUrl: safeUrl };
 }
 
+async function extractVideoNoAudioFromUrl(sourceUrl, workspace, onProgress, signal) {
+  throwIfAborted(signal);
+  const safeUrl = await validateResolvedSourceUrl(sourceUrl);
+  throwIfAborted(signal);
+
+  const tempPath = path.join(workspace, 'temp_video_download.mp4');
+  await ytdlpService.downloadWithYtDlp(
+    safeUrl,
+    tempPath,
+    onProgress
+  );
+  throwIfAborted(signal);
+
+  const outputPath = path.join(workspace, 'source_video_no_audio.mp4');
+  await runBinary(ytdlpService.getFfmpegPath(), [
+    '-y',
+    '-hide_banner',
+    '-loglevel', 'error',
+    '-i', tempPath,
+    '-an',
+    '-c:v', 'copy',
+    outputPath
+  ], 'Tách video không âm thanh', signal);
+
+  await fs.promises.unlink(tempPath).catch(() => {});
+
+  const probe = await probeMedia(outputPath, signal);
+  if (!probe.hasVideo) {
+    throw new MediaStudioError('Nguồn không chứa luồng hình ảnh (video)', 422, 'VIDEO_STREAM_MISSING');
+  }
+  return { filePath: outputPath, probe, sourceUrl: safeUrl };
+}
+
 function formatTimestamp(value) {
   return Number(value).toFixed(6).replace(/0+$/, '').replace(/\.$/, '') || '0';
 }
@@ -584,7 +617,7 @@ async function persistMediaFile(localPath, options = {}) {
   };
 
   let uploadWarning = '';
-  if (storageIsConfigured() && typeof supabaseStorageService.uploadMediaFile === 'function') {
+  if (!options.forceLocal && storageIsConfigured() && typeof supabaseStorageService.uploadMediaFile === 'function') {
     try {
       const result = await supabaseStorageService.uploadMediaFile(localPath, {
         folder: options.folder || '',
@@ -623,7 +656,7 @@ async function persistMediaFile(localPath, options = {}) {
       uploadWarning = error.message;
     }
   } else {
-    uploadWarning = 'Supabase chưa được cấu hình';
+    uploadWarning = options.forceLocal ? '' : 'Supabase chưa được cấu hình';
   }
 
   if (options.requireRemote) {
@@ -662,7 +695,7 @@ async function persistMediaFile(localPath, options = {}) {
       url,
       downloadUrl: url
     },
-    warning: `Không thể lưu Supabase; đã giữ file local. ${uploadWarning}`
+    warning: uploadWarning ? `Không thể lưu Supabase; đã giữ file local. ${uploadWarning}` : null
   };
 }
 
@@ -765,6 +798,7 @@ module.exports = {
   ensureLocalMediaDir,
   extensionForVideoUpload,
   extractAudioFromUrl,
+  extractVideoNoAudioFromUrl,
   getMaxUploadBytes,
   getOwnerFolder,
   inferContentType,

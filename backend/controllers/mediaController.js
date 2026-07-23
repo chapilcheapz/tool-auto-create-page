@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const mediaStudioService = require('../services/mediaStudioService');
+const supabaseStorageService = require('../services/supabaseStorageService');
 
 let activeProcessingJobs = 0;
 
@@ -179,8 +180,38 @@ async function extractAudio(req, res) {
       kind: 'audio',
       contentType: 'audio/mpeg',
       duration: extracted.probe.duration,
-      signal: abortContext.signal
+      signal: abortContext.signal,
+      forceLocal: true
     });
+
+    // Tách thêm video không âm thanh từ cùng link đó
+    let videoAsset = null;
+    let videoWarning = null;
+    try {
+      const extractedVideo = await mediaStudioService.extractVideoNoAudioFromUrl(
+        sourceUrl,
+        workspace,
+        undefined,
+        abortContext.signal
+      );
+      mediaStudioService.throwIfAborted(abortContext.signal);
+      
+      const videoFileName = mediaStudioService.makeSafeFileName(`video_silent_${owner}`, '.mp4');
+      const persistedVideo = await mediaStudioService.persistMediaFile(extractedVideo.filePath, {
+        folder: mediaStudioService.getOwnerFolder(owner, 'videos'),
+        fileName: videoFileName,
+        prefix: `video_silent_${owner}`,
+        kind: 'video',
+        contentType: 'video/mp4',
+        duration: extractedVideo.probe.duration,
+        signal: abortContext.signal,
+        forceLocal: true
+      });
+      videoAsset = persistedVideo.asset;
+      videoWarning = persistedVideo.warning;
+    } catch (videoError) {
+      console.warn('[extractAudio] Không thể tách thêm video không âm thanh:', videoError.message);
+    }
 
     return res.json({
       success: true,
@@ -188,7 +219,8 @@ async function extractAudio(req, res) {
         ...persisted.asset,
         sourceUrl: extracted.sourceUrl
       },
-      warning: persisted.warning
+      video: videoAsset,
+      warning: joinWarnings(persisted.warning, videoWarning)
     });
   } catch (error) {
     return sendError(res, error, 'Tách âm thanh thất bại');
@@ -238,7 +270,8 @@ async function removeAudioSegment(req, res) {
       kind: 'audio',
       contentType: 'audio/mpeg',
       duration: edited.probe.duration,
-      signal: abortContext.signal
+      signal: abortContext.signal,
+      forceLocal: true
     });
 
     return res.json({
@@ -298,7 +331,7 @@ async function uploadVideo(req, res) {
       contentType,
       duration: probe.duration,
       originalName,
-      requireRemote: true,
+      forceLocal: true,
       signal: abortContext.signal
     });
 
@@ -485,11 +518,104 @@ async function serveLocalMedia(req, res) {
   }
 }
 
+async function persistRemoteMedia(req, res) {
+  const abortContext = createRequestAbortContext(req, res);
+  try {
+    const owner = ownerFromRequest(req);
+    const { localFileName, kind } = req.body;
+    if (!localFileName || !kind) {
+      throw new mediaStudioService.MediaStudioError('Thiếu thông tin tệp tin cần lưu', 400);
+    }
+    if (!['audio', 'video'].includes(kind)) {
+      throw new mediaStudioService.MediaStudioError('Loại tệp tin không hợp lệ', 400);
+    }
+
+    const localFilePath = path.join(mediaStudioService.LOCAL_MEDIA_DIR, localFileName);
+    if (!fs.existsSync(localFilePath)) {
+      throw new mediaStudioService.MediaStudioError('Không tìm thấy tệp tin cục bộ trên server', 404);
+    }
+
+    const probe = await mediaStudioService.probeMedia(localFilePath, abortContext.signal);
+    mediaStudioService.throwIfAborted(abortContext.signal);
+
+    const folderMap = { audio: 'audio', video: 'videos' };
+    const prefixMap = { audio: `audio_${owner}`, video: `video_silent_${owner}` };
+    const contentTypeMap = { audio: 'audio/mpeg', video: 'video/mp4' };
+
+    const persisted = await mediaStudioService.persistMediaFile(localFilePath, {
+      folder: mediaStudioService.getOwnerFolder(owner, folderMap[kind]),
+      fileName: localFileName,
+      prefix: prefixMap[kind],
+      kind,
+      contentType: contentTypeMap[kind],
+      duration: probe.duration,
+      signal: abortContext.signal,
+      requireRemote: true
+    });
+
+    await fs.promises.unlink(localFilePath).catch(() => {});
+
+    return res.json({
+      success: true,
+      asset: persisted.asset
+    });
+  } catch (error) {
+    return sendError(res, error, 'Lưu tệp lên Supabase thất bại');
+  } finally {
+    abortContext.dispose();
+  }
+}
+
+async function deleteMedia(req, res) {
+  try {
+    const owner = ownerFromRequest(req);
+    const { storageProvider, localFileName, storagePath } = req.body;
+    
+    if (storageProvider === 'local') {
+      if (!localFileName) {
+        throw new mediaStudioService.MediaStudioError('Thiếu tên file cần xoá', 400);
+      }
+      const ownerSegment = mediaStudioService.sanitizeOwnerSegment(owner);
+      if (!localFileName.includes(`_${ownerSegment}_`) && !localFileName.startsWith(`audio_${ownerSegment}`) && !localFileName.startsWith(`video_silent_${ownerSegment}`)) {
+        throw new mediaStudioService.MediaStudioError('Không có quyền xoá file này', 403);
+      }
+      const filePath = path.join(mediaStudioService.LOCAL_MEDIA_DIR, localFileName);
+      if (fs.existsSync(filePath)) {
+        await fs.promises.unlink(filePath);
+      }
+      return res.json({ success: true, message: 'Đã xoá file cục bộ trên server' });
+    } else if (storageProvider === 'supabase') {
+      if (!storagePath) {
+        throw new mediaStudioService.MediaStudioError('Thiếu đường dẫn lưu trữ Supabase', 400);
+      }
+      const allowedFolder = mediaStudioService.getOwnerFolder(owner, 'videos');
+      const audioFolder = mediaStudioService.getOwnerFolder(owner, 'audio');
+      
+      const normalizedPath = String(storagePath).trim().replace(/\\/g, '/').replace(/^\/+/, '');
+      if (!normalizedPath.startsWith(`${allowedFolder}/`) && !normalizedPath.startsWith(`${audioFolder}/`)) {
+        throw new mediaStudioService.MediaStudioError('Không có quyền xoá file này', 403);
+      }
+      
+      const result = await supabaseStorageService.deleteMediaFile(storagePath);
+      if (!result?.success) {
+        throw new mediaStudioService.MediaStudioError(result?.error || 'Không thể xoá file trên Supabase', 502);
+      }
+      return res.json({ success: true, message: 'Đã xoá file trên Supabase thành công' });
+    } else {
+      throw new mediaStudioService.MediaStudioError('Nhà cung cấp lưu trữ không hợp lệ', 400);
+    }
+  } catch (error) {
+    return sendError(res, error, 'Xoá file thất bại');
+  }
+}
+
 module.exports = {
   extractAudio,
   removeAudioSegment,
   uploadVideo,
   listVideos,
   mergeMedia,
-  serveLocalMedia
+  serveLocalMedia,
+  persistRemoteMedia,
+  deleteMedia
 };

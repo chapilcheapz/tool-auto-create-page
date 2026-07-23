@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, RefreshCw, ShieldCheck, Loader2, Plus, Trash2 } from 'lucide-react';
+import { X, RefreshCw, ShieldCheck, Loader2, Plus, Trash2, Upload, Video, CheckCircle, AlertTriangle } from 'lucide-react';
 import * as api from '../utils/api';
 
 export default function SettingsModal({ isOpen, onClose, showToast, onCookieChange, initialCookie }) {
-  const [activeTab, setActiveTab] = useState('cookie'); // 'cookie' | 'login' | 'password'
+  const [activeTab, setActiveTab] = useState('cookie'); // 'cookie' | 'login' | 'yttiktok' | 'password'
   
   // States for cookie tab
   const [cookies, setCookies] = useState(['']);
@@ -26,6 +26,20 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
   const [verifyLoading, setVerifyLoading] = useState(false);
   const [screenshotTs, setScreenshotTs] = useState(Date.now());
   const pollRef = useRef(null);
+
+  // States for yt-dlp cookies tab
+  const [ytdlpCookies, setYtdlpCookies] = useState('');
+  const [ytdlpStatus, setYtdlpStatus] = useState(null);
+  const [ytdlpLoading, setYtdlpLoading] = useState(false);
+  const [ytdlpUploading, setYtdlpUploading] = useState(false);
+
+  // States for YouTube & TikTok cookie tab
+  const [ytCookie, setYtCookie] = useState('');
+  const [tiktokCookie, setTiktokCookie] = useState('');
+  const [ytStatus, setYtStatus] = useState(null);
+  const [tiktokStatus, setTiktokStatus] = useState(null);
+  const [ytSaving, setYtSaving] = useState(false);
+  const [tiktokSaving, setTiktokSaving] = useState(false);
 
   // Diagnostics states
   const [diagnoses, setDiagnoses] = useState({});
@@ -52,8 +66,119 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
   useEffect(() => {
     if (isOpen) {
       runDiagnostics();
+      fetchYtdlpStatus();
+      fetchPlatformStatus('youtube');
+      fetchPlatformStatus('tiktok');
+      fetchPlatformContent('youtube');
+      fetchPlatformContent('tiktok');
     }
   }, [isOpen]);
+
+  const fetchPlatformStatus = async (platform) => {
+    try {
+      const res = await fetch(`/api/config/platform-cookies/${platform}/status`, {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('jwt_token')}` }
+      });
+      const data = await res.json();
+      if (data.success) {
+        if (platform === 'youtube') setYtStatus(data);
+        else setTiktokStatus(data);
+      }
+    } catch {}
+  };
+
+  // Load nội dung cookie từ Supabase để hiển thị lại trong textarea
+  const fetchPlatformContent = async (platform) => {
+    try {
+      const res = await fetch(`/api/config/platform-cookies/${platform}/content`, {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('jwt_token')}` }
+      });
+      const data = await res.json();
+      if (data.success && data.content) {
+        if (platform === 'youtube') setYtCookie(data.content);
+        else setTiktokCookie(data.content);
+      }
+    } catch {}
+  };
+
+  const handleSavePlatformCookie = async (platform) => {
+    const content = platform === 'youtube' ? ytCookie : tiktokCookie;
+    if (!content.trim()) {
+      showToast('Vui lòng dán cookie trước!', 'error');
+      return;
+    }
+    if (platform === 'youtube') setYtSaving(true);
+    else setTiktokSaving(true);
+    try {
+      const res = await fetch(`/api/config/platform-cookies/${platform}/upload`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('jwt_token')}`
+        },
+        body: JSON.stringify({ content: content.trim() })
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(data.message, 'success');
+        await fetchPlatformStatus(platform);
+      } else {
+        showToast(data.error || 'Lưu thất bại.', 'error');
+      }
+    } catch {
+      showToast('Lỗi kết nối máy chủ.', 'error');
+    } finally {
+      if (platform === 'youtube') setYtSaving(false);
+      else setTiktokSaving(false);
+    }
+  };
+
+  const handleClearPlatformCookie = async (platform) => {
+    // Reset state là xóa cookie (không có file thì ytdlp bỏ qua)
+    if (platform === 'youtube') { setYtCookie(''); setYtStatus(null); }
+    else { setTiktokCookie(''); setTiktokStatus(null); }
+    showToast(`Đã xóa cookie ${platform === 'youtube' ? 'YouTube' : 'TikTok'} (chỉ trong phiên hiện tại).`, 'success');
+  };
+
+  const fetchYtdlpStatus = async () => {
+    setYtdlpLoading(true);
+    try {
+      const res = await fetch('/api/config/ytdlp-cookies/status', {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('jwt_token')}` }
+      });
+      const data = await res.json();
+      if (data.success) setYtdlpStatus(data);
+    } catch {}
+    setYtdlpLoading(false);
+  };
+
+  const handleUploadYtdlpCookies = async () => {
+    if (!ytdlpCookies.trim()) {
+      showToast('Vui lòng dán nội dung cookies.txt trước!', 'error');
+      return;
+    }
+    setYtdlpUploading(true);
+    try {
+      const res = await fetch('/api/config/ytdlp-cookies/upload', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('jwt_token')}`
+        },
+        body: JSON.stringify({ content: ytdlpCookies })
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(data.message || 'Upload cookies thành công!', 'success');
+        await fetchYtdlpStatus();
+      } else {
+        showToast(data.error || 'Upload thất bại.', 'error');
+      }
+    } catch {
+      showToast('Lỗi kết nối máy chủ.', 'error');
+    }
+    setYtdlpUploading(false);
+  };
 
 
   useEffect(() => {
@@ -242,8 +367,8 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
     }
   };
 
-  const activeTabClass = 'flex-1 pb-2 text-xs font-bold text-[var(--text-main)] border-b-2 border-[var(--text-main)] bg-transparent border-none cursor-pointer text-center outline-none transition-all duration-200';
-  const inactiveTabClass = 'flex-1 pb-2 text-xs font-bold text-[var(--text-muted)] hover:text-[var(--text-main)] bg-transparent border-none cursor-pointer text-center outline-none transition-all duration-200';
+  const activeTabClass = 'pb-2 px-3 text-xs font-semibold text-[var(--text-main)] border-b-2 border-blue-500 bg-transparent cursor-pointer text-center outline-none transition-all duration-200 border-x-0 border-t-0 shrink-0';
+  const inactiveTabClass = 'pb-2 px-3 text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text-main)] bg-transparent border-b-2 border-transparent cursor-pointer text-center outline-none transition-all duration-200 border-x-0 border-t-0 shrink-0';
 
   return (
     <>
@@ -351,7 +476,7 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
         {/* Body */}
         <div className="p-5 flex flex-col">
           {/* Tabs */}
-          <div className="flex border-b border-[var(--border-main)] mb-4">
+          <div className="flex items-center gap-2 border-b border-[var(--border-main)] mb-4 overflow-x-auto pb-0.5 scrollbar-none">
             <button 
               onClick={() => setActiveTab('cookie')}
               className={activeTab === 'cookie' ? activeTabClass : inactiveTabClass}
@@ -365,10 +490,16 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
               Đăng nhập tài khoản
             </button>
             <button 
+              onClick={() => setActiveTab('yttiktok')}
+              className={activeTab === 'yttiktok' ? activeTabClass : inactiveTabClass}
+            >
+              YT &amp; TikTok
+            </button>
+            <button 
               onClick={() => setActiveTab('password')}
               className={activeTab === 'password' ? activeTabClass : inactiveTabClass}
             >
-              Đổi mật khẩu hệ thống
+              Đổi mật khẩu
             </button>
           </div>
 
@@ -473,7 +604,140 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
             </div>
           )}
 
+
+          {/* Panel: Cookie YouTube & TikTok - 1 card gộp */}
+          {activeTab === 'yttiktok' && (
+            <div className="space-y-4 animate-in fade-in duration-200">
+
+              {/* ONE unified card */}
+              <div className="rounded-xl border border-[var(--border-main)] overflow-hidden">
+
+                {/* ── Header ── */}
+                <div className="flex items-center gap-2 px-4 py-2.5 border-b border-[var(--border-main)]"
+                  style={{background: 'linear-gradient(90deg, rgba(255,68,68,0.12) 0%, var(--bg-card,transparent) 50%, rgba(255,0,80,0.10) 100%)'}}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="#ff4444"><path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.5 12 3.5 12 3.5s-7.5 0-9.4.5A3 3 0 0 0 .5 6.2C0 8.1 0 12 0 12s0 3.9.5 5.8a3 3 0 0 0 2.1 2.1c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1C24 15.9 24 12 24 12s0-3.9-.5-5.8zM9.7 15.5V8.5l6.3 3.5-6.3 3.5z"/></svg>
+                  <span className="text-[11px] font-bold text-red-400">YouTube</span>
+                  <span className="text-[var(--text-muted)] text-xs">&amp;</span>
+                  <svg width="10" height="12" viewBox="0 0 24 27" fill="#ff0050"><path d="M19.6 5.4A5.7 5.7 0 0 1 16 3.7V0h-4.3v18.5a3.3 3.3 0 0 1-3.3 2.9 3.3 3.3 0 0 1-3.3-3.3 3.3 3.3 0 0 1 3.3-3.3c.3 0 .6 0 .9.1V10.4a7.6 7.6 0 0 0-.9-.1A7.6 7.6 0 0 0 .8 17.9a7.6 7.6 0 0 0 7.6 7.6 7.6 7.6 0 0 0 7.6-7.6V9.1a9.9 9.9 0 0 0 5.8 1.8V6.6a5.7 5.7 0 0 1-2.2-1.2z"/></svg>
+                  <span className="text-[11px] font-bold" style={{color:'#ff0050'}}>TikTok</span>
+                  <span className="ml-auto flex items-center gap-1 text-[9px] font-medium">
+                    {(ytStatus?.active || tiktokStatus?.active) ? (
+                      <><span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      <span className="text-emerald-400">Cookie đang hoạt động</span></>
+                    ) : (
+                      <span className="text-amber-400/80">Chưa có cookie</span>
+                    )}
+                  </span>
+                </div>
+
+                {/* ── YouTube section ── */}
+                <div className="p-3 border-b border-[var(--border-main)]/50">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[11px] font-semibold text-red-400 flex items-center gap-1">
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.5 12 3.5 12 3.5s-7.5 0-9.4.5A3 3 0 0 0 .5 6.2C0 8.1 0 12 0 12s0 3.9.5 5.8a3 3 0 0 0 2.1 2.1c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1C24 15.9 24 12 24 12s0-3.9-.5-5.8zM9.7 15.5V8.5l6.3 3.5-6.3 3.5z"/></svg>
+                      Cookie YouTube
+                    </span>
+                    {ytStatus?.active ? (
+                      ytStatus.inSupabase ? (
+                        <span className="flex items-center gap-1 text-[9px] font-medium text-emerald-400">
+                          <CheckCircle size={9}/> {ytStatus.lineCount} cookie · Đã lưu lên Server ✓
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 text-[9px] font-medium text-amber-400">
+                          <CheckCircle size={9}/> {ytStatus.lineCount} cookie · Lưu tạm trong RAM
+                        </span>
+                      )
+                    ) : (
+                      <span className="text-[9px] text-amber-400/80">Chưa có cookie</span>
+                    )}
+                  </div>
+                  <textarea
+                    id="ytCookieTextarea"
+                    className="w-full bg-[var(--input-bg)] border border-[var(--input-border)] rounded-lg px-3 py-2 text-xs text-[var(--text-main)] focus:outline-none focus:border-red-400/60 transition-all outline-none font-mono resize-none placeholder:text-[var(--text-muted)]"
+                    rows={3}
+                    placeholder={"Dán cookie YouTube (raw: key=val; key=val... hoặc Netscape cookies.txt)..."}
+                    value={ytCookie}
+                    onChange={(e) => setYtCookie(e.target.value)}
+                    spellCheck={false}
+                  />
+                  <div className="flex items-center gap-2 mt-1.5">
+                    <button id="btnSaveYtCookie" onClick={() => handleSavePlatformCookie('youtube')}
+                      disabled={ytSaving || !ytCookie.trim()}
+                      className="flex items-center gap-1.5 bg-red-500/90 hover:bg-red-500 disabled:opacity-40 text-white py-1.5 px-3.5 rounded-lg text-[11px] font-semibold transition-all cursor-pointer border-none">
+                      {ytSaving ? <Loader2 size={11} className="animate-spin"/> : <Upload size={11}/>}
+                      {ytSaving ? 'Đang lưu...' : 'Lưu YouTube'}
+                    </button>
+                    {ytCookie && (
+                      <button onClick={() => { setYtCookie(''); setYtStatus(null); }}
+                        className="text-[10px] text-[var(--text-muted)] hover:text-red-400 transition-colors cursor-pointer bg-transparent border-none flex items-center gap-0.5">
+                        <Trash2 size={10}/> Xóa
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* ── TikTok section ── */}
+                <div className="p-3">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[11px] font-semibold flex items-center gap-1" style={{color:'#ff0050'}}>
+                      <svg width="8" height="10" viewBox="0 0 24 27" fill="currentColor"><path d="M19.6 5.4A5.7 5.7 0 0 1 16 3.7V0h-4.3v18.5a3.3 3.3 0 0 1-3.3 2.9 3.3 3.3 0 0 1-3.3-3.3 3.3 3.3 0 0 1 3.3-3.3c.3 0 .6 0 .9.1V10.4a7.6 7.6 0 0 0-.9-.1A7.6 7.6 0 0 0 .8 17.9a7.6 7.6 0 0 0 7.6 7.6 7.6 7.6 0 0 0 7.6-7.6V9.1a9.9 9.9 0 0 0 5.8 1.8V6.6a5.7 5.7 0 0 1-2.2-1.2z"/></svg>
+                      Cookie TikTok
+                    </span>
+                    {tiktokStatus?.active ? (
+                      tiktokStatus.inSupabase ? (
+                        <span className="flex items-center gap-1 text-[9px] font-medium text-emerald-400">
+                          <CheckCircle size={9}/> {tiktokStatus.lineCount} cookie · Đã lưu lên Server ✓
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 text-[9px] font-medium text-amber-400">
+                          <CheckCircle size={9}/> {tiktokStatus.lineCount} cookie · Lưu tạm trong RAM
+                        </span>
+                      )
+                    ) : (
+                      <span className="text-[9px] text-amber-400/80">Chưa có cookie</span>
+                    )}
+                  </div>
+                  <textarea
+                    id="tiktokCookieTextarea"
+                    className="w-full bg-[var(--input-bg)] border border-[var(--input-border)] rounded-lg px-3 py-2 text-xs text-[var(--text-main)] focus:outline-none transition-all outline-none font-mono resize-none placeholder:text-[var(--text-muted)]"
+                    rows={3}
+                    placeholder={"Dán cookie TikTok (raw: key=val; key=val... hoặc Netscape cookies.txt)..."}
+                    value={tiktokCookie}
+                    onChange={(e) => setTiktokCookie(e.target.value)}
+                    spellCheck={false}
+                    onFocus={(e) => e.target.style.borderColor = '#ff005088'}
+                    onBlur={(e) => e.target.style.borderColor = ''}
+                  />
+                  <div className="flex items-center gap-2 mt-1.5">
+                    <button id="btnSaveTiktokCookie" onClick={() => handleSavePlatformCookie('tiktok')}
+                      disabled={tiktokSaving || !tiktokCookie.trim()}
+                      className="flex items-center gap-1.5 disabled:opacity-40 text-white py-1.5 px-3.5 rounded-lg text-[11px] font-semibold transition-all cursor-pointer border-none"
+                      style={{background:'#ff0050'}}>
+                      {tiktokSaving ? <Loader2 size={11} className="animate-spin"/> : <Upload size={11}/>}
+                      {tiktokSaving ? 'Đang lưu...' : 'Lưu TikTok'}
+                    </button>
+                    {tiktokCookie && (
+                      <button onClick={() => { setTiktokCookie(''); setTiktokStatus(null); }}
+                        className="text-[10px] text-[var(--text-muted)] hover:text-red-400 transition-colors cursor-pointer bg-transparent border-none flex items-center gap-0.5">
+                        <Trash2 size={10}/> Xóa
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Note */}
+              <p className="text-[10px] text-[var(--text-muted)] leading-relaxed flex items-start gap-1">
+                <span>⚡</span>
+                <span>Cookie được lưu vào <strong className="text-[var(--text-main)]">Supabase</strong> — bền vững qua mọi lần restart. Server tự load khi khởi động và ưu tiên dùng đúng cookie theo nền tảng.</span>
+              </p>
+            </div>
+          )}
+
+
           {/* Panel 2: FB Auto Login */}
+
           {activeTab === 'login' && (
             <form onSubmit={handleFbLogin} className="space-y-4 animate-in fade-in duration-200">
               <div className="flex flex-col gap-2">

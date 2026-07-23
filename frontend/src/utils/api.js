@@ -225,3 +225,21 @@ export async function mergeAudioWithVideo(audio, video) {
   });
   return safeJsonResponse(response);
 }
+
+export async function persistRemoteMedia(localFileName, kind) {
+  const response = await authFetch('/api/media/persist-remote', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ localFileName, kind })
+  });
+  return safeJsonResponse(response);
+}
+
+export async function deleteMedia(body) {
+  const response = await authFetch('/api/media/delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  return safeJsonResponse(response);
+}
