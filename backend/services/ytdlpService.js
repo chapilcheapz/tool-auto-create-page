@@ -75,7 +75,7 @@ function isRunnableBinary(candidate, toolName) {
   const result = spawnSync(candidate, versionArgs, {
     shell: false,
     stdio: 'ignore',
-    timeout: 5_000,
+    timeout: 15_000,
     windowsHide: true
   });
   const runnable = result.status === 0;
