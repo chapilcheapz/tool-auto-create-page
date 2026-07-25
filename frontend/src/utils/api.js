@@ -196,6 +196,24 @@ export async function removeAudioSegment(audio, start, end) {
   return safeJsonResponse(response);
 }
 
+export async function transcribeAudio(audio) {
+  const response = await authFetch('/api/media/audio/transcribe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ audio })
+  });
+  return safeJsonResponse(response);
+}
+
+export async function removeAudioSegments(audio, deletedRanges) {
+  const response = await authFetch('/api/media/audio/remove-segments', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ audio, deletedRanges })
+  });
+  return safeJsonResponse(response);
+}
+
 export async function getSupabaseVideos(signal) {
   const response = await authFetch('/api/media/videos', { signal });
   return safeJsonResponse(response);
@@ -217,11 +235,32 @@ export async function uploadSupabaseVideo(file) {
   return safeJsonResponse(response);
 }
 
-export async function mergeAudioWithVideo(audio, video) {
+export async function uploadWatermark(file) {
+  if (!file) {
+    throw new Error('Vui lòng chọn một file ảnh để tải lên.');
+  }
+
+  const response = await authFetch('/api/media/watermark/upload', {
+    method: 'POST',
+    headers: {
+      'Content-Type': file.type || 'application/octet-stream',
+      'X-File-Name': encodeURIComponent(file.name || 'watermark.png')
+    },
+    body: file
+  });
+  return safeJsonResponse(response);
+}
+
+export async function mergeAudioWithVideo(audio, videos, watermark) {
+  // videos có thể là mảng (multi-video) hoặc object đơn (backward-compat)
+  const isArray = Array.isArray(videos);
+  const body = isArray
+    ? { audio, videos, watermark, mode: 'replace' }
+    : { audio, video: videos, watermark, mode: 'replace' };
   const response = await authFetch('/api/media/merge', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ audio, video, mode: 'replace' })
+    body: JSON.stringify(body)
   });
   return safeJsonResponse(response);
 }

@@ -369,10 +369,16 @@ function downloadWithYtDlp(sourceUrl, outputTemplate, onProgress) {
     const javascriptRuntimeArgs = buildJavaScriptRuntimeArgs(sourceUrl);
 
     const isYoutube = sourceUrl.includes('youtube.com') || sourceUrl.includes('youtu.be');
-    const extraBypassArgs = isYoutube ? [
-      '--extractor-args', 'youtube:player_client=ios,android,mweb',
-      '--user-agent', 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1'
-    ] : [];
+    const hasCookies = cookieArgs && cookieArgs.length > 0;
+    const extraBypassArgs = isYoutube
+      ? (hasCookies
+          ? [] // Khi dùng cookie, giữ nguyên User-Agent mặc định hoặc để yt-dlp tự đồng bộ nhằm tránh lỗi 403
+          : [
+              '--extractor-args', 'youtube:player_client=ios,android,mweb',
+              '--user-agent', 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1'
+            ]
+        )
+      : [];
 
     const args = [
       '--ignore-config',

@@ -12,7 +12,7 @@ const { pipeline } = require('stream/promises');
  */
 
 const DEFAULT_BUCKET_NAME = 'videos';
-const DEFAULT_STORAGE_MAX_BYTES = 500 * 1024 * 1024;
+const DEFAULT_STORAGE_MAX_BYTES = 5000 * 1024 * 1024;
 const DEFAULT_SIGNED_URL_TTL_SECONDS = 24 * 60 * 60;
 const LIST_PAGE_SIZE = 100;
 

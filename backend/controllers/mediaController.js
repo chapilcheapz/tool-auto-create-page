@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const mediaStudioService = require('../services/mediaStudioService');
 const supabaseStorageService = require('../services/supabaseStorageService');
+const speechToTextService = require('../services/speechToTextService');
 
 let activeProcessingJobs = 0;
 
@@ -184,43 +185,14 @@ async function extractAudio(req, res) {
       forceLocal: true
     });
 
-    // Tách thêm video không âm thanh từ cùng link đó
-    let videoAsset = null;
-    let videoWarning = null;
-    try {
-      const extractedVideo = await mediaStudioService.extractVideoNoAudioFromUrl(
-        sourceUrl,
-        workspace,
-        undefined,
-        abortContext.signal
-      );
-      mediaStudioService.throwIfAborted(abortContext.signal);
-      
-      const videoFileName = mediaStudioService.makeSafeFileName(`video_silent_${owner}`, '.mp4');
-      const persistedVideo = await mediaStudioService.persistMediaFile(extractedVideo.filePath, {
-        folder: mediaStudioService.getOwnerFolder(owner, 'videos'),
-        fileName: videoFileName,
-        prefix: `video_silent_${owner}`,
-        kind: 'video',
-        contentType: 'video/mp4',
-        duration: extractedVideo.probe.duration,
-        signal: abortContext.signal,
-        forceLocal: true
-      });
-      videoAsset = persistedVideo.asset;
-      videoWarning = persistedVideo.warning;
-    } catch (videoError) {
-      console.warn('[extractAudio] Không thể tách thêm video không âm thanh:', videoError.message);
-    }
-
     return res.json({
       success: true,
       audio: {
         ...persisted.asset,
         sourceUrl: extracted.sourceUrl
       },
-      video: videoAsset,
-      warning: joinWarnings(persisted.warning, videoWarning)
+      video: null,
+      warning: persisted.warning
     });
   } catch (error) {
     return sendError(res, error, 'Tách âm thanh thất bại');
@@ -349,6 +321,65 @@ async function uploadVideo(req, res) {
   }
 }
 
+async function uploadWatermark(req, res) {
+  let workspace = '';
+  let releaseSlot = () => {};
+  const abortContext = createRequestAbortContext(req, res);
+  try {
+    releaseSlot = acquireProcessingSlot();
+    const owner = ownerFromRequest(req);
+    const originalName = decodeOriginalFileName(req.get('x-file-name'));
+    const requestedContentType = String(req.get('content-type') || '').split(';')[0].trim().toLowerCase();
+    const ext = path.extname(originalName).toLowerCase() || '.png';
+
+    const allowedImageExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp']);
+    if (!allowedImageExtensions.has(ext)) {
+      throw new mediaStudioService.MediaStudioError(
+        'File tải lên không phải là ảnh hợp lệ (chỉ hỗ trợ .png, .jpg, .jpeg, .webp)',
+        422,
+        'INVALID_IMAGE_TYPE'
+      );
+    }
+
+    workspace = await mediaStudioService.createWorkspace();
+    const inputPath = path.join(workspace, mediaStudioService.makeSafeFileName('watermark', ext));
+    await writeRequestBodyToFile(req, inputPath, mediaStudioService.getMaxUploadBytes());
+
+    mediaStudioService.throwIfAborted(abortContext.signal);
+    const contentType = requestedContentType.startsWith('image/')
+      ? requestedContentType
+      : (ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg');
+
+    const originalBaseName = path.parse(originalName).name || 'watermark';
+    const fileName = mediaStudioService.makeSafeFileName(
+      `watermark_${owner}_${originalBaseName}`,
+      ext
+    );
+    const persisted = await mediaStudioService.persistMediaFile(inputPath, {
+      folder: mediaStudioService.getOwnerFolder(owner, 'videos'),
+      fileName,
+      prefix: `watermark_${owner}`,
+      kind: 'image',
+      contentType,
+      originalName,
+      forceLocal: true,
+      signal: abortContext.signal
+    });
+
+    return res.status(201).json({
+      success: true,
+      watermark: persisted.asset,
+      warning: persisted.warning
+    });
+  } catch (error) {
+    return sendError(res, error, 'Tải ảnh watermark thất bại');
+  } finally {
+    await mediaStudioService.cleanupWorkspace(workspace);
+    abortContext.dispose();
+    releaseSlot();
+  }
+}
+
 async function listVideos(req, res) {
   try {
     const owner = ownerFromRequest(req);
@@ -374,30 +405,89 @@ async function mergeMedia(req, res) {
     if (mode !== 'replace') {
       throw new mediaStudioService.MediaStudioError('Hiện tại chỉ hỗ trợ chế độ thay thế âm thanh');
     }
-    if (!req.body?.video || !req.body?.audio) {
+
+    // Hỗ trợ cả videos[] (mảng) lẫn video (đơn) - backward compatible
+    const videosBody = req.body?.videos;
+    const videoBody = req.body?.video;
+    const isMultiVideo = Array.isArray(videosBody) && videosBody.length > 0;
+
+    if (!isMultiVideo && !videoBody) {
       throw new mediaStudioService.MediaStudioError('Vui lòng chọn đủ video và âm thanh');
+    }
+    if (!req.body?.audio) {
+      throw new mediaStudioService.MediaStudioError('Vui lòng chọn âm thanh trước khi ghép');
     }
 
     workspace = await mediaStudioService.createWorkspace();
-    const videoInput = await mediaStudioService.materializeMediaReference(req.body.video, workspace, {
-      allowedFolder: mediaStudioService.getOwnerFolder(owner, 'videos'),
-      allowedLocalPrefixes: [`video_${owner}_`, `merged_${owner}_`],
-      fallbackExtension: '.mp4'
-    });
+
     const audioInput = await mediaStudioService.materializeMediaReference(req.body.audio, workspace, {
       allowedFolder: mediaStudioService.getOwnerFolder(owner, 'audio'),
       allowedLocalPrefixes: [`audio_${owner}_`, `audio_edit_${owner}_`],
       fallbackExtension: '.mp3'
     });
+
+    let watermarkInput = null;
+    if (req.body?.watermark) {
+      watermarkInput = await mediaStudioService.materializeMediaReference(req.body.watermark, workspace, {
+        allowedFolder: mediaStudioService.getOwnerFolder(owner, 'videos'),
+        allowedLocalPrefixes: [`watermark_${owner}_`],
+        fallbackExtension: '.png'
+      });
+    }
     mediaStudioService.throwIfAborted(abortContext.signal);
 
     const outputPath = path.join(workspace, mediaStudioService.makeSafeFileName('merged', '.mp4'));
-    const merged = await mediaStudioService.mergeVideoWithAudio(
-      videoInput.filePath,
-      audioInput.filePath,
-      outputPath,
-      abortContext.signal
-    );
+    let merged;
+    const inputWarnings = [audioInput.warning, watermarkInput?.warning];
+
+    if (isMultiVideo) {
+      // --- MULTI VIDEO: concat + lặp theo thời lượng âm thanh ---
+      const allowedLocalPrefixes = [
+        `video_${owner}_`, `video_silent_${owner}_`,
+        `merged_${owner}_`
+      ];
+      const videoInputs = await Promise.all(
+        videosBody.map(ref =>
+          mediaStudioService.materializeMediaReference(ref, workspace, {
+            allowedFolder: mediaStudioService.getOwnerFolder(owner, 'videos'),
+            allowedLocalPrefixes,
+            fallbackExtension: '.mp4'
+          })
+        )
+      );
+      mediaStudioService.throwIfAborted(abortContext.signal);
+      const videoPaths = videoInputs.map(v => v.filePath);
+      videoInputs.forEach(v => inputWarnings.push(v.warning));
+
+      merged = await mediaStudioService.mergeMultipleVideosWithAudio(
+        videoPaths,
+        audioInput.filePath,
+        outputPath,
+        watermarkInput ? watermarkInput.filePath : null,
+        abortContext.signal
+      );
+    } else {
+      // --- SINGLE VIDEO: luồng cũ ---
+      const videoInput = await mediaStudioService.materializeMediaReference(videoBody, workspace, {
+        allowedFolder: mediaStudioService.getOwnerFolder(owner, 'videos'),
+        allowedLocalPrefixes: [
+          `video_${owner}_`, `video_silent_${owner}_`,
+          `merged_${owner}_`
+        ],
+        fallbackExtension: '.mp4'
+      });
+      inputWarnings.push(videoInput.warning);
+      mediaStudioService.throwIfAborted(abortContext.signal);
+
+      merged = await mediaStudioService.mergeVideoWithAudio(
+        videoInput.filePath,
+        audioInput.filePath,
+        outputPath,
+        watermarkInput ? watermarkInput.filePath : null,
+        abortContext.signal
+      );
+    }
+
     mediaStudioService.throwIfAborted(abortContext.signal);
     const fileName = mediaStudioService.makeSafeFileName(`merged_${owner}`, '.mp4');
     const persisted = await mediaStudioService.persistMediaFile(merged.filePath, {
@@ -413,7 +503,7 @@ async function mergeMedia(req, res) {
     return res.json({
       success: true,
       video: persisted.asset,
-      warning: joinWarnings(videoInput.warning, audioInput.warning, persisted.warning)
+      warning: joinWarnings(...inputWarnings, persisted.warning)
     });
   } catch (error) {
     return sendError(res, error, 'Ghép video và âm thanh thất bại');
@@ -455,9 +545,10 @@ async function serveLocalMedia(req, res) {
       decodedName = decodeURIComponent(decodedName);
     } catch (_) {}
     const extension = mediaStudioService.safeExtension(decodedName, '');
-    const generatedNamePattern = /^(?:audio|audio_edit|video|merged)_[\p{L}\p{N}._-]+_\d{10,}_[a-f0-9]{32}\.[a-z0-9]{1,8}$/iu;
+    const generatedNamePattern = /^(?:audio|audio_edit|video|merged|watermark)_[\p{L}\p{N}._-]+_\d{10,}_[a-f0-9]{32}\.[a-z0-9]{1,8}$/iu;
     const allowedExtension = mediaStudioService.AUDIO_EXTENSIONS.has(extension) ||
-      mediaStudioService.VIDEO_EXTENSIONS.has(extension);
+      mediaStudioService.VIDEO_EXTENSIONS.has(extension) ||
+      ['.png', '.jpg', '.jpeg', '.webp'].includes(extension);
     if (!generatedNamePattern.test(decodedName) || !allowedExtension) {
       return res.status(403).send('Tên file media không được phép truy cập');
     }
@@ -569,8 +660,18 @@ async function persistRemoteMedia(req, res) {
 async function deleteMedia(req, res) {
   try {
     const owner = ownerFromRequest(req);
-    const { storageProvider, localFileName, storagePath } = req.body;
-    
+    const { localFileName, storagePath } = req.body;
+    let { storageProvider } = req.body;
+
+    // Tự động suy luận storageProvider nếu thiếu
+    if (!storageProvider) {
+      if (storagePath) {
+        storageProvider = 'supabase';
+      } else if (localFileName) {
+        storageProvider = 'local';
+      }
+    }
+
     if (storageProvider === 'local') {
       if (!localFileName) {
         throw new mediaStudioService.MediaStudioError('Thiếu tên file cần xoá', 400);
@@ -600,6 +701,15 @@ async function deleteMedia(req, res) {
       if (!result?.success) {
         throw new mediaStudioService.MediaStudioError(result?.error || 'Không thể xoá file trên Supabase', 502);
       }
+
+      // Dọn dẹp cả file local nếu có tồn tại đĩa cục bộ để tránh bị load lại
+      if (localFileName) {
+        const filePath = path.join(mediaStudioService.LOCAL_MEDIA_DIR, localFileName);
+        if (fs.existsSync(filePath)) {
+          await fs.promises.unlink(filePath).catch(() => {});
+        }
+      }
+
       return res.json({ success: true, message: 'Đã xoá file trên Supabase thành công' });
     } else {
       throw new mediaStudioService.MediaStudioError('Nhà cung cấp lưu trữ không hợp lệ', 400);
@@ -609,10 +719,108 @@ async function deleteMedia(req, res) {
   }
 }
 
+async function transcribeAudio(req, res) {
+  let workspace = '';
+  let releaseSlot = () => {};
+  const abortContext = createRequestAbortContext(req, res);
+  try {
+    releaseSlot = acquireProcessingSlot();
+    const owner = ownerFromRequest(req);
+    const audioReference = req.body?.audio || req.body?.audioRef || {
+      storagePath: req.body?.storagePath,
+      localFileName: req.body?.localFileName
+    };
+    workspace = await mediaStudioService.createWorkspace();
+
+    const materialized = await mediaStudioService.materializeMediaReference(audioReference, workspace, {
+      allowedFolder: mediaStudioService.getOwnerFolder(owner, 'audio'),
+      allowedLocalPrefixes: [`audio_${owner}_`, `audio_edit_${owner}_`],
+      fallbackExtension: '.mp3'
+    });
+    mediaStudioService.throwIfAborted(abortContext.signal);
+
+    const transcript = await speechToTextService.transcribeAudioFile(materialized.filePath);
+
+    return res.json({
+      success: true,
+      transcript,
+      warning: materialized.warning
+    });
+  } catch (error) {
+    return sendError(res, error, 'Chuyển đổi giọng nói thành văn bản thất bại');
+  } finally {
+    await mediaStudioService.cleanupWorkspace(workspace);
+    abortContext.dispose();
+    releaseSlot();
+  }
+}
+
+async function removeAudioSegments(req, res) {
+  let workspace = '';
+  let releaseSlot = () => {};
+  const abortContext = createRequestAbortContext(req, res);
+  try {
+    releaseSlot = acquireProcessingSlot();
+    const owner = ownerFromRequest(req);
+    const audioReference = req.body?.audio || req.body?.audioRef || {
+      storagePath: req.body?.storagePath,
+      localFileName: req.body?.localFileName
+    };
+    const deletedRanges = req.body?.deletedRanges || [];
+    workspace = await mediaStudioService.createWorkspace();
+
+    const materialized = await mediaStudioService.materializeMediaReference(audioReference, workspace, {
+      allowedFolder: mediaStudioService.getOwnerFolder(owner, 'audio'),
+      allowedLocalPrefixes: [`audio_${owner}_`, `audio_edit_${owner}_`],
+      fallbackExtension: '.mp3'
+    });
+    mediaStudioService.throwIfAborted(abortContext.signal);
+
+    const outputPath = path.join(workspace, mediaStudioService.makeSafeFileName('edited', '.mp3'));
+    const edited = await mediaStudioService.removeAudioSegments(
+      materialized.filePath,
+      outputPath,
+      deletedRanges,
+      abortContext.signal
+    );
+    mediaStudioService.throwIfAborted(abortContext.signal);
+
+    const fileName = mediaStudioService.makeSafeFileName(`audio_edit_${owner}`, '.mp3');
+    const persisted = await mediaStudioService.persistMediaFile(edited.filePath, {
+      folder: mediaStudioService.getOwnerFolder(owner, 'audio'),
+      fileName,
+      prefix: `audio_edit_${owner}`,
+      kind: 'audio',
+      contentType: 'audio/mpeg',
+      duration: edited.probe.duration,
+      signal: abortContext.signal,
+      forceLocal: true
+    });
+
+    return res.json({
+      success: true,
+      audio: {
+        ...persisted.asset,
+        removedSegments: edited.deletedRanges
+      },
+      warning: joinWarnings(materialized.warning, persisted.warning)
+    });
+  } catch (error) {
+    return sendError(res, error, 'Cắt các đoạn âm thanh thất bại');
+  } finally {
+    await mediaStudioService.cleanupWorkspace(workspace);
+    abortContext.dispose();
+    releaseSlot();
+  }
+}
+
 module.exports = {
   extractAudio,
   removeAudioSegment,
+  removeAudioSegments,
+  transcribeAudio,
   uploadVideo,
+  uploadWatermark,
   listVideos,
   mergeMedia,
   serveLocalMedia,

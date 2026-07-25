@@ -46,11 +46,14 @@ router.post('/react-post', reactController.bulkReact);
 
 // Media studio routes (all processing and library mutations require login)
 router.post('/media/audio/extract', mediaController.extractAudio);
+router.post('/media/audio/transcribe', mediaController.transcribeAudio);
 router.post('/media/audio/remove-segment', mediaController.removeAudioSegment);
+router.post('/media/audio/remove-segments', mediaController.removeAudioSegments);
 router.get('/media/videos', mediaController.listVideos);
 // The controller streams the binary request to a temporary file and enforces
 // MEDIA_MAX_UPLOAD_BYTES without buffering a large video in Node.js memory.
 router.post('/media/videos/upload', mediaController.uploadVideo);
+router.post('/media/watermark/upload', mediaController.uploadWatermark);
 router.post('/media/merge', mediaController.mergeMedia);
 router.post('/media/persist-remote', mediaController.persistRemoteMedia);
 router.post('/media/delete', mediaController.deleteMedia);
