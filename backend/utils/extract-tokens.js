@@ -1,8 +1,51 @@
 const { chromium } = require('playwright');
 const axios = require('axios');
+const path = require('path');
+const fs = require('fs');
 
-// In-memory cache for extracted tokens to avoid launching browser/making requests repeatedly
+// Đường dẫn lưu file cache trong thư mục storage/
+const storageDir = path.join(__dirname, '../../storage');
+if (!fs.existsSync(storageDir)) {
+  try {
+    fs.mkdirSync(storageDir, { recursive: true });
+  } catch (e) {}
+}
+const tokenCacheFilePath = path.join(storageDir, 'token-cache.json');
+
+// In-memory cache for extracted tokens
 const tokenCache = new Map();
+
+// Đọc cache từ file storage/token-cache.json khi khởi động
+(function loadTokenCacheFromFile() {
+  try {
+    if (fs.existsSync(tokenCacheFilePath)) {
+      const rawData = fs.readFileSync(tokenCacheFilePath, 'utf8');
+      const parsed = JSON.parse(rawData);
+      if (parsed && typeof parsed === 'object') {
+        for (const [key, val] of Object.entries(parsed)) {
+          tokenCache.set(key, val);
+        }
+      }
+    }
+  } catch (e) {
+    // Nếu file bị lỗi, tạo lại file trống
+  }
+})();
+
+// Hàm ghi cache từ RAM xuống file storage/token-cache.json (bất đồng bộ an toàn)
+let saveTimer = null;
+function saveTokenCacheToFile() {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try {
+      const obj = {};
+      for (const [key, val] of tokenCache.entries()) {
+        obj[key] = val;
+      }
+      fs.writeFile(tokenCacheFilePath, JSON.stringify(obj, null, 2), 'utf8', () => {});
+    } catch (e) {}
+  }, 300);
+}
 
 function decodeUnicode(str) {
   if (!str) return str;
@@ -168,7 +211,7 @@ async function extractTokens(cookieString) {
   // 3. Thử trích xuất qua HTTP Request siêu tốc
   const httpResult = await extractViaHttp(cookieString, userId);
   if (httpResult.success) {
-    // Lưu vào cache trước khi trả về
+    // Lưu vào cache
     tokenCache.set(userId, {
       fb_dtsg: httpResult.fb_dtsg,
       __user: httpResult.__user,
@@ -177,6 +220,7 @@ async function extractTokens(cookieString) {
       __rev: httpResult.__rev,
       __hsi: httpResult.__hsi
     });
+    saveTokenCacheToFile();
     return httpResult;
   }
 
@@ -309,6 +353,7 @@ async function extractTokens(cookieString) {
       };
       // Lưu vào cache
       tokenCache.set(userId, successData);
+      saveTokenCacheToFile();
       return {
         success: true,
         ...successData
@@ -338,6 +383,7 @@ function clearUserCache(userId) {
   } else {
     tokenCache.clear();
   }
+  saveTokenCacheToFile();
 }
 
 /**

@@ -19,6 +19,58 @@ const verificationState = {
 // Bộ nhớ đệm lưu BYTES ảnh đại diện Facebook trực tiếp (tránh CDN URL hết hạn hoặc cần auth)
 const memoryAvatarCache = {}; // { [uid]: { bytes: Buffer, contentType: string, expiresAt: number } }
 
+const storageDir = path.join(__dirname, '../../storage');
+if (!fs.existsSync(storageDir)) {
+  try {
+    fs.mkdirSync(storageDir, { recursive: true });
+  } catch (e) {}
+}
+const avatarCacheFilePath = path.join(storageDir, 'avatar-cache.json');
+
+// Nạp Avatar Cache từ file storage/avatar-cache.json khi server khởi động
+(function loadAvatarCacheFromFile() {
+  try {
+    if (fs.existsSync(avatarCacheFilePath)) {
+      const rawData = fs.readFileSync(avatarCacheFilePath, 'utf8');
+      const parsed = JSON.parse(rawData);
+      if (parsed && typeof parsed === 'object') {
+        const now = Date.now();
+        for (const [key, val] of Object.entries(parsed)) {
+          if (val && val.base64 && val.expiresAt > now) {
+            memoryAvatarCache[key] = {
+              bytes: Buffer.from(val.base64, 'base64'),
+              contentType: val.contentType || 'image/jpeg',
+              expiresAt: val.expiresAt
+            };
+          }
+        }
+      }
+    }
+  } catch (e) {}
+})();
+
+// Ghi Avatar Cache xuống file storage/avatar-cache.json (Debounced Async Write)
+let avatarSaveTimer = null;
+function saveAvatarCacheToFile() {
+  if (avatarSaveTimer) clearTimeout(avatarSaveTimer);
+  avatarSaveTimer = setTimeout(() => {
+    try {
+      const now = Date.now();
+      const obj = {};
+      for (const [key, val] of Object.entries(memoryAvatarCache)) {
+        if (val && val.bytes && val.expiresAt > now) {
+          obj[key] = {
+            base64: val.bytes.toString('base64'),
+            contentType: val.contentType,
+            expiresAt: val.expiresAt
+          };
+        }
+      }
+      fs.writeFile(avatarCacheFilePath, JSON.stringify(obj, null, 2), 'utf8', () => {});
+    } catch (e) {}
+  }, 500);
+}
+
 // Base32 decoding helper
 function base32Decode(base32) {
   base32 = base32.replace(/=+$/, '').replace(/\s/g, '').toUpperCase();
@@ -575,6 +627,7 @@ async function getFbAvatarService(requestedUid) {
           expiresAt: Date.now() + 6 * 60 * 60 * 1000
         };
         memoryAvatarCache[cacheKey] = result;
+        saveAvatarCacheToFile();
         return result;
       }
     } catch (e) {
@@ -638,6 +691,7 @@ async function fetchAvatarBytes(cookie, uid) {
           expiresAt: Date.now() + 6 * 60 * 60 * 1000
         };
         memoryAvatarCache[uid] = result;
+        saveAvatarCacheToFile();
         return result;
       }
     } catch (e) {
@@ -706,6 +760,7 @@ async function fetchAvatarBytes(cookie, uid) {
           expiresAt: Date.now() + 6 * 60 * 60 * 1000
         };
         memoryAvatarCache[uid] = result;
+        saveAvatarCacheToFile();
         return result;
       }
     }
