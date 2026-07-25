@@ -1,7 +1,8 @@
 const axios = require('axios');
 const querystring = require('querystring');
 const { chromium } = require('playwright');
-const { extractTokens } = require('../utils/extract-tokens');
+const { extractTokens, clearUserCache } = require('../utils/extract-tokens');
+const { clearAvatarCache } = require('./facebookAuthService');
 const { generatePageName, generateBio, buildCommonParams, buildHeaders } = require('../utils/random');
 const { getDocId, autoDiscoverDocId } = require('../utils/doc-manager');
 
@@ -128,6 +129,12 @@ async function getPages(cookie) {
         if (!seenIds.has(page.id)) { seenIds.add(page.id); allPages.push(page); }
       }
     } catch (err) {
+      const cUserMatch = singleCookie.match(/c_user=(\d+)/);
+      if (cUserMatch && cUserMatch[1]) {
+        const uid = cUserMatch[1];
+        clearUserCache(uid);
+        clearAvatarCache(uid);
+      }
       console.error(`⚠️ [getPages] Bỏ qua cookie lỗi:`, err.message);
     }
   }

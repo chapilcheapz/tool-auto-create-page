@@ -71,6 +71,17 @@ function saveAvatarCacheToFile() {
   }, 500);
 }
 
+function clearAvatarCache(uid) {
+  if (uid) {
+    delete memoryAvatarCache[uid];
+  } else {
+    for (const key of Object.keys(memoryAvatarCache)) {
+      delete memoryAvatarCache[key];
+    }
+  }
+  saveAvatarCacheToFile();
+}
+
 // Base32 decoding helper
 function base32Decode(base32) {
   base32 = base32.replace(/=+$/, '').replace(/\s/g, '').toUpperCase();
@@ -837,4 +848,5 @@ module.exports = {
   fbLoginService,
   getFbAvatarService,
   diagnoseCookiesService,
+  clearAvatarCache
 };
