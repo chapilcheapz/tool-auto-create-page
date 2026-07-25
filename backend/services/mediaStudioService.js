@@ -8,7 +8,7 @@ const path = require('path');
 const supabaseStorageService = require('./supabaseStorageService');
 const ytdlpService = require('./ytdlpService');
 
-const DEFAULT_MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
+const DEFAULT_MAX_UPLOAD_BYTES = 5000 * 1024 * 1024;
 const DEFAULT_PROCESS_TIMEOUT_MS = 30 * 60 * 1000;
 const LOCAL_MEDIA_DIR = path.resolve(
   (process.env.MEDIA_DIR || path.join(__dirname, '../../storage/media')).replace(/^"|"$/g, '')
@@ -438,7 +438,98 @@ async function removeAudioSegment(inputPath, outputPath, start, end, signal) {
   };
 }
 
-async function mergeVideoWithAudio(videoPath, audioPath, outputPath, signal) {
+async function removeAudioSegments(inputPath, outputPath, deletedRanges, signal) {
+  const probe = await probeMedia(inputPath, signal);
+  if (!probe.hasAudio || probe.duration <= 0) {
+    throw new MediaStudioError('File không có luồng âm thanh hợp lệ', 422, 'AUDIO_STREAM_MISSING');
+  }
+
+  if (!Array.isArray(deletedRanges)) {
+    throw new MediaStudioError('Danh sách các đoạn cần xoá không hợp lệ');
+  }
+
+  const validDeleted = deletedRanges
+    .map(([start, end]) => [Number(start), Number(end)])
+    .filter(([start, end]) => Number.isFinite(start) && Number.isFinite(end) && start < end && start >= 0);
+
+  // Sắp xếp các đoạn cần xoá theo thời gian bắt đầu
+  validDeleted.sort((a, b) => a[0] - b[0]);
+
+  // Gộp các khoảng thời gian bị đè lên nhau
+  const mergedDeleted = [];
+  for (const range of validDeleted) {
+    if (mergedDeleted.length === 0) {
+      mergedDeleted.push(range);
+    } else {
+      const last = mergedDeleted[mergedDeleted.length - 1];
+      if (range[0] <= last[1]) {
+        last[1] = Math.max(last[1], range[1]);
+      } else {
+        mergedDeleted.push(range);
+      }
+    }
+  }
+
+  const duration = probe.duration;
+  const epsilon = 0.005;
+  const keptRanges = [];
+  
+  let currentStart = 0;
+  for (const [delStart, delEnd] of mergedDeleted) {
+    if (delStart > currentStart + epsilon) {
+      keptRanges.push([currentStart, delStart]);
+    }
+    currentStart = Math.max(currentStart, delEnd);
+  }
+  if (currentStart < duration - epsilon) {
+    keptRanges.push([currentStart, duration]);
+  }
+
+  if (keptRanges.length === 0) {
+    throw new MediaStudioError('Không thể xoá toàn bộ bản âm thanh');
+  }
+
+  let filterComplex;
+  if (keptRanges.length === 1) {
+    const [rangeStart, rangeEnd] = keptRanges[0];
+    filterComplex = `[0:a:0]atrim=start=${formatTimestamp(rangeStart)}:end=${formatTimestamp(rangeEnd)},asetpts=PTS-STARTPTS[outa]`;
+  } else {
+    const trimFilters = keptRanges.map(([rangeStart, rangeEnd], index) => (
+      `[0:a:0]atrim=start=${formatTimestamp(rangeStart)}:end=${formatTimestamp(rangeEnd)},asetpts=PTS-STARTPTS[a${index}]`
+    ));
+    const inputs = keptRanges.map((_, index) => `[a${index}]`).join('');
+    filterComplex = `${trimFilters.join(';')};${inputs}concat=n=${keptRanges.length}:v=0:a=1[outa]`;
+  }
+
+  await runBinary(ytdlpService.getFfmpegPath(), [
+    '-y',
+    '-hide_banner',
+    '-loglevel', 'error',
+    '-i', inputPath,
+    '-filter_complex', filterComplex,
+    '-map', '[outa]',
+    '-vn',
+    '-c:a', 'libmp3lame',
+    '-q:a', '2',
+    '-id3v2_version', '3',
+    outputPath
+  ], 'Không thể cắt các đoạn âm thanh đã chọn', signal);
+
+  const outputProbe = await probeMedia(outputPath, signal);
+  return {
+    filePath: outputPath,
+    probe: outputProbe,
+    keptRanges,
+    deletedRanges: mergedDeleted
+  };
+}
+
+async function mergeVideoWithAudio(videoPath, audioPath, outputPath, watermarkPath, signal) {
+  if (typeof watermarkPath === 'object' && watermarkPath !== null && !signal) {
+    signal = watermarkPath;
+    watermarkPath = null;
+  }
+
   const [videoProbe, audioProbe] = await Promise.all([
     probeMedia(videoPath, signal),
     probeMedia(audioPath, signal)
@@ -450,43 +541,71 @@ async function mergeVideoWithAudio(videoPath, audioPath, outputPath, signal) {
     throw new MediaStudioError('File đã chọn không có luồng âm thanh', 422, 'AUDIO_STREAM_MISSING');
   }
 
-  const commonArgs = [
-    '-y',
-    '-hide_banner',
-    '-loglevel', 'error',
-    '-i', videoPath,
-    '-i', audioPath,
-    '-filter_complex', '[1:a:0]apad[outa]',
-    '-map', '0:v:0',
-    '-map', '[outa]',
-    '-map_metadata', '0',
-    '-c:a', 'aac',
-    '-b:a', '192k',
-    '-t', formatTimestamp(videoProbe.duration),
-    '-movflags', '+faststart'
-  ];
+  const hasWatermark = !!watermarkPath;
 
-  try {
-    await runBinary(ytdlpService.getFfmpegPath(), [
-      ...commonArgs,
-      '-c:v', 'copy',
+  if (hasWatermark) {
+    const args = [
+      '-y',
+      '-hide_banner',
+      '-loglevel', 'error',
+      '-i', videoPath,
+      '-i', audioPath,
+      '-i', watermarkPath,
+      '-filter_complex', '[2:v]format=rgba,colorchannelmixer=aa=0.55[wm];[wm]scale=150:-1[wm_scaled];[0:v][wm_scaled]overlay=x=main_w-overlay_w-15:y=15[outv];[1:a:0]apad[outa]',
+      '-map', '[outv]',
+      '-map', '[outa]',
+      '-map_metadata', '0',
+      '-c:v', 'libx264',
+      '-preset', 'medium',
+      '-crf', '20',
+      '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac',
+      '-b:a', '192k',
+      '-t', formatTimestamp(videoProbe.duration),
+      '-movflags', '+faststart',
       outputPath
-    ], 'Không thể ghép video và âm thanh', signal);
-  } catch (copyError) {
-    if (copyError?.code === 'OPERATION_ABORTED') throw copyError;
-    await fs.promises.unlink(outputPath).catch(() => {});
+    ];
+
+    await runBinary(ytdlpService.getFfmpegPath(), args, 'Không thể ghép video và âm thanh có logo', signal);
+  } else {
+    const commonArgs = [
+      '-y',
+      '-hide_banner',
+      '-loglevel', 'error',
+      '-i', videoPath,
+      '-i', audioPath,
+      '-filter_complex', '[1:a:0]apad[outa]',
+      '-map', '0:v:0',
+      '-map', '[outa]',
+      '-map_metadata', '0',
+      '-c:a', 'aac',
+      '-b:a', '192k',
+      '-t', formatTimestamp(videoProbe.duration),
+      '-movflags', '+faststart'
+    ];
+
     try {
       await runBinary(ytdlpService.getFfmpegPath(), [
         ...commonArgs,
-        '-c:v', 'libx264',
-        '-preset', 'medium',
-        '-crf', '20',
-        '-pix_fmt', 'yuv420p',
+        '-c:v', 'copy',
         outputPath
-      ], 'Không thể mã hoá lại video sau khi ghép âm thanh', signal);
-    } catch (encodeError) {
-      encodeError.message = `${encodeError.message}. Lỗi ghép nhanh ban đầu: ${copyError.message}`;
-      throw encodeError;
+      ], 'Không thể ghép video và âm thanh', signal);
+    } catch (copyError) {
+      if (copyError?.code === 'OPERATION_ABORTED') throw copyError;
+      await fs.promises.unlink(outputPath).catch(() => {});
+      try {
+        await runBinary(ytdlpService.getFfmpegPath(), [
+          ...commonArgs,
+          '-c:v', 'libx264',
+          '-preset', 'medium',
+          '-crf', '20',
+          '-pix_fmt', 'yuv420p',
+          outputPath
+        ], 'Không thể mã hoá lại video sau khi ghép âm thanh', signal);
+      } catch (encodeError) {
+        encodeError.message = `${encodeError.message}. Lỗi ghép nhanh ban đầu: ${copyError.message}`;
+        throw encodeError;
+      }
     }
   }
 
@@ -495,6 +614,130 @@ async function mergeVideoWithAudio(videoPath, audioPath, outputPath, signal) {
     throw new MediaStudioError('File sau khi ghép không có đủ luồng video và âm thanh', 422, 'INVALID_MERGED_MEDIA');
   }
   return { filePath: outputPath, probe: outputProbe, videoProbe, audioProbe };
+}
+
+async function mergeMultipleVideosWithAudio(videoPaths, audioPath, outputPath, watermarkPath, signal) {
+  if (typeof watermarkPath === 'object' && watermarkPath !== null && !signal) {
+    signal = watermarkPath;
+    watermarkPath = null;
+  }
+
+  if (!Array.isArray(videoPaths) || videoPaths.length === 0) {
+    throw new MediaStudioError('Vui lòng cung cấp ít nhất một video');
+  }
+
+  // Probe audio và tất cả video song song
+  const [audioProbe, ...videoProbes] = await Promise.all([
+    probeMedia(audioPath, signal),
+    ...videoPaths.map(p => probeMedia(p, signal))
+  ]);
+
+  if (!audioProbe.hasAudio) {
+    throw new MediaStudioError('File đã chọn không có luồng âm thanh', 422, 'AUDIO_STREAM_MISSING');
+  }
+  const audioDuration = audioProbe.duration;
+  if (audioDuration <= 0) {
+    throw new MediaStudioError('File âm thanh có thời lượng không hợp lệ', 422, 'INVALID_AUDIO_DURATION');
+  }
+
+  for (let i = 0; i < videoProbes.length; i++) {
+    if (!videoProbes[i].hasVideo || videoProbes[i].duration <= 0) {
+      throw new MediaStudioError(`Video #${i + 1} không có luồng hình ảnh hợp lệ`, 422, 'VIDEO_STREAM_MISSING');
+    }
+  }
+  throwIfAborted(signal);
+
+  const ffmpeg = ytdlpService.getFfmpegPath();
+  const hasWatermark = !!watermarkPath;
+  const workspace = path.dirname(outputPath);
+  let concatListPath = null;
+
+  const cleanup = async () => {
+    if (concatListPath) await fs.promises.unlink(concatListPath).catch(() => {});
+  };
+
+  try {
+    // Xây dựng input arguments cho FFmpeg
+    let videoInputArgs;
+
+    if (videoPaths.length === 1 && !hasWatermark) {
+      // TỐI ƯU: 1 video → dùng -stream_loop -1 (nhanh nhất, không cần file concat)
+      videoInputArgs = ['-stream_loop', '-1', '-i', videoPaths[0]];
+    } else {
+      // Nhiều video: tạo concat list, lặp đủ để >= audioDuration
+      const totalVideoDuration = videoProbes.reduce((sum, p) => sum + p.duration, 0);
+      const loopsNeeded = Math.ceil(audioDuration / totalVideoDuration);
+
+      const concatLines = [];
+      for (let loop = 0; loop < loopsNeeded; loop++) {
+        for (const vp of videoPaths) {
+          const escaped = vp.replace(/'/g, "'\\''");
+          concatLines.push(`file '${escaped}'`);
+        }
+      }
+      concatListPath = path.join(workspace, `concat_${Date.now()}.txt`);
+      await fs.promises.writeFile(concatListPath, concatLines.join('\n'), 'utf8');
+      throwIfAborted(signal);
+
+      videoInputArgs = ['-f', 'concat', '-safe', '0', '-i', concatListPath];
+    }
+
+    if (hasWatermark) {
+      // Với watermark: phải re-encode, 1 pass duy nhất
+      await runBinary(ffmpeg, [
+        '-y', '-hide_banner', '-loglevel', 'error',
+        ...videoInputArgs,
+        '-i', audioPath,
+        '-i', watermarkPath,
+        '-filter_complex', '[2:v]format=rgba,colorchannelmixer=aa=0.55[wm];[wm]scale=150:-1[wm_scaled];[0:v][wm_scaled]overlay=x=main_w-overlay_w-15:y=15[outv]',
+        '-map', '[outv]',
+        '-map', '1:a:0',
+        '-c:v', 'libx264', '-preset', 'fast', '-crf', '20', '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-b:a', '192k',
+        '-t', formatTimestamp(audioDuration),
+        '-movflags', '+faststart',
+        outputPath
+      ], 'Ghép video, âm thanh và logo thất bại', signal);
+    } else {
+      // Không watermark: thử copy trước (nhanh nhất), fallback re-encode
+      try {
+        await runBinary(ffmpeg, [
+          '-y', '-hide_banner', '-loglevel', 'error',
+          ...videoInputArgs,
+          '-i', audioPath,
+          '-map', '0:v:0', '-map', '1:a:0',
+          '-c:v', 'copy',
+          '-c:a', 'aac', '-b:a', '192k',
+          '-t', formatTimestamp(audioDuration),
+          '-movflags', '+faststart',
+          outputPath
+        ], 'Ghép video và âm thanh (copy)', signal);
+      } catch (copyErr) {
+        if (copyErr?.code === 'OPERATION_ABORTED') throw copyErr;
+        await fs.promises.unlink(outputPath).catch(() => {});
+        // Fallback: re-encode với preset fast
+        await runBinary(ffmpeg, [
+          '-y', '-hide_banner', '-loglevel', 'error',
+          ...videoInputArgs,
+          '-i', audioPath,
+          '-map', '0:v:0', '-map', '1:a:0',
+          '-c:v', 'libx264', '-preset', 'fast', '-crf', '20', '-pix_fmt', 'yuv420p',
+          '-c:a', 'aac', '-b:a', '192k',
+          '-t', formatTimestamp(audioDuration),
+          '-movflags', '+faststart',
+          outputPath
+        ], 'Ghép video và âm thanh (re-encode) thất bại', signal);
+      }
+    }
+  } finally {
+    await cleanup();
+  }
+
+  const outputProbe = await probeMedia(outputPath, signal);
+  if (!outputProbe.hasVideo || !outputProbe.hasAudio) {
+    throw new MediaStudioError('File sau khi ghép không có đủ luồng video và âm thanh', 422, 'INVALID_MERGED_MEDIA');
+  }
+  return { filePath: outputPath, probe: outputProbe, audioProbe };
 }
 
 function storageIsConfigured() {
@@ -805,10 +1048,12 @@ module.exports = {
   listVideoAssets,
   makeSafeFileName,
   materializeMediaReference,
+  mergeMultipleVideosWithAudio,
   mergeVideoWithAudio,
   persistMediaFile,
   probeMedia,
   removeAudioSegment,
+  removeAudioSegments,
   resolveLocalMediaPath,
   safeExtension,
   sanitizeOwnerSegment,

@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertCircle,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Clipboard,
   Clock,
   Download,
@@ -119,35 +121,6 @@ function normalizeUrl(value) {
   }
 }
 
-function StepHeader({ number, icon, title, description, complete, busy }) {
-  return (
-    <div className="flex flex-col gap-3 border-b border-[var(--border-main)] pb-5 sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex items-start gap-3">
-        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border ${
-          complete
-            ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
-            : 'border-indigo-500/25 bg-indigo-500/10 text-indigo-400'
-        }`}>
-          {complete ? <CheckCircle2 size={20} /> : icon}
-        </div>
-        <div>
-          <div className="mb-1 flex flex-wrap items-center gap-2">
-            <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-indigo-400">Bước {number}</span>
-            {busy && <Loader2 size={13} className="animate-spin text-indigo-400" />}
-          </div>
-          <h2 className="text-base font-bold text-[var(--text-main)] sm:text-lg">{title}</h2>
-          <p className="mt-1 text-xs leading-relaxed text-[var(--text-muted)]">{description}</p>
-        </div>
-      </div>
-      {complete && (
-        <span className="ml-13 inline-flex w-fit items-center gap-1.5 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-3 py-1 text-[10px] font-bold text-emerald-400 sm:ml-0">
-          <CheckCircle2 size={12} /> Hoàn tất
-        </span>
-      )}
-    </div>
-  );
-}
-
 function ErrorNotice({ message }) {
   if (!message) return null;
   return (
@@ -181,6 +154,7 @@ function EmptyState({ icon, title, description }) {
 }
 
 export default function VideoDownloadView({ showToast }) {
+  // --- STATES & REFS ---
   const [url, setUrl] = useState('');
   const [audioAsset, setAudioAsset] = useState(null);
   const [originalAudioAsset, setOriginalAudioAsset] = useState(null);
@@ -188,7 +162,7 @@ export default function VideoDownloadView({ showToast }) {
   const [extractError, setExtractError] = useState('');
   const [extractWarning, setExtractWarning] = useState('');
 
-  const [editorOpen, setEditorOpen] = useState(false);
+  // Manual Audio Slider Editing States
   const [audioDuration, setAudioDuration] = useState(0);
   const [deleteStart, setDeleteStart] = useState(0);
   const [deleteEnd, setDeleteEnd] = useState(0);
@@ -198,8 +172,9 @@ export default function VideoDownloadView({ showToast }) {
   const [editError, setEditError] = useState('');
   const [editWarning, setEditWarning] = useState('');
 
+  // Video Library States
   const [videos, setVideos] = useState([]);
-  const [selectedVideo, setSelectedVideo] = useState(null);
+  const [selectedVideos, setSelectedVideos] = useState([]); // Ordered list of selected videos
   const [videoSearch, setVideoSearch] = useState('');
   const [videosLoading, setVideosLoading] = useState(false);
   const [uploadingVideo, setUploadingVideo] = useState(false);
@@ -207,6 +182,12 @@ export default function VideoDownloadView({ showToast }) {
   const [videoWarning, setVideoWarning] = useState('');
   const [uploadName, setUploadName] = useState('');
 
+  // Watermark/Logo States
+  const [watermarkAsset, setWatermarkAsset] = useState(null);
+  const [uploadingWatermark, setUploadingWatermark] = useState(false);
+  const [watermarkError, setWatermarkError] = useState('');
+
+  // Merging States
   const [merging, setMerging] = useState(false);
   const [mergeError, setMergeError] = useState('');
   const [mergeWarning, setMergeWarning] = useState('');
@@ -215,94 +196,32 @@ export default function VideoDownloadView({ showToast }) {
   const [persistingAudio, setPersistingAudio] = useState(false);
   const [persistingVideo, setPersistingVideo] = useState(false);
 
-  const handlePersistAudio = async () => {
-    if (!audioAsset || audioAsset.storageProvider !== 'local') return;
-    setPersistingAudio(true);
-    try {
-      const res = await api.persistRemoteMedia(audioAsset.localFileName, 'audio');
-      if (res.success && res.asset) {
-        setAudioAsset(res.asset);
-        if (originalAudioAsset && originalAudioAsset.localFileName === audioAsset.localFileName) {
-          setOriginalAudioAsset(res.asset);
-        }
-        if (showToast) showToast('Đã tải âm thanh lên Supabase thành công!', 'success');
-      } else {
-        throw new Error(res.error || 'Lưu thất bại.');
-      }
-    } catch (err) {
-      if (showToast) showToast(err.message || 'Lỗi khi tải lên Supabase.', 'error');
-    } finally {
-      setPersistingAudio(false);
-    }
-  };
-
-  const handlePersistVideo = async () => {
-    if (!selectedVideo || selectedVideo.storageProvider !== 'local') return;
-    setPersistingVideo(true);
-    try {
-      const res = await api.persistRemoteMedia(selectedVideo.localFileName, 'video');
-      if (res.success && res.asset) {
-        setSelectedVideo(res.asset);
-        setVideos((current) => [
-          res.asset,
-          ...current.filter((item) => getAssetKey(item) !== getAssetKey(selectedVideo))
-        ]);
-        if (showToast) showToast('Đã tải video lên Supabase thành công!', 'success');
-      } else {
-        throw new Error(res.error || 'Lưu thất bại.');
-      }
-    } catch (err) {
-      if (showToast) showToast(err.message || 'Lỗi khi tải lên Supabase.', 'error');
-    } finally {
-      setPersistingVideo(false);
-    }
-  };
-
-  const handleDeleteVideo = async (video) => {
-    if (!video) return;
-    const isLocal = video.storageProvider === 'local';
-    const locationName = isLocal ? 'bộ nhớ tạm của server' : 'Supabase Cloud';
-    const confirmed = window.confirm(`Bạn có chắc chắn muốn xóa video "${getAssetName(video)}" khỏi ${locationName}?`);
-    if (!confirmed) return;
-
-    try {
-      const payload = isLocal
-        ? { storageProvider: 'local', localFileName: video.localFileName }
-        : { storageProvider: 'supabase', storagePath: getAssetPath(video) };
-
-      const res = await api.deleteMedia(payload);
-      if (res.success) {
-        if (selectedVideo && getAssetKey(selectedVideo) === getAssetKey(video)) {
-          setSelectedVideo(null);
-        }
-        setVideos((current) => current.filter((item) => getAssetKey(item) !== getAssetKey(video)));
-        if (showToast) showToast(`Đã xóa video khỏi ${isLocal ? 'server' : 'Supabase'} thành công!`, 'success');
-      } else {
-        throw new Error(res.error || 'Xoá thất bại.');
-      }
-    } catch (err) {
-      if (showToast) showToast(err.message || `Lỗi khi xóa video khỏi ${isLocal ? 'server' : 'Supabase'}.`, 'error');
-    }
-  };
-
   const audioRef = useRef(null);
   const fileInputRef = useRef(null);
+  const watermarkInputRef = useRef(null);
   const extractSequenceRef = useRef(0);
   const extractAbortRef = useRef(null);
+  const mergeDebounceRef = useRef(null); // debounce timer cho auto-merge
   const audioAssetRef = useRef(audioAsset);
-  const selectedVideoRef = useRef(selectedVideo);
+  const selectedVideosRef = useRef(selectedVideos);
+  const watermarkAssetRef = useRef(watermarkAsset);
+
   audioAssetRef.current = audioAsset;
-  selectedVideoRef.current = selectedVideo;
+  selectedVideosRef.current = selectedVideos;
+  watermarkAssetRef.current = watermarkAsset;
 
   const currentAudioKey = getAssetKey(audioAsset);
   const originalAudioKey = getAssetKey(originalAudioAsset);
-  const selectedVideoKey = getAssetKey(selectedVideo);
   const mergedVideoUrl = getAssetUrl(mergedVideo);
   const mergedVideoDownloadUrl = getAssetDownloadUrl(mergedVideo);
   const currentAudioUrl = getAssetUrl(audioAsset);
   const selectionLength = Math.max(0, deleteEnd - deleteStart);
   const isEditedAudio = Boolean(currentAudioKey && originalAudioKey && currentAudioKey !== originalAudioKey);
 
+  // Total duration of selected videos
+  const selectedVideosTotalDuration = selectedVideos.reduce((sum, v) => sum + (Number(v.duration) || 0), 0);
+
+  // --- VIDEO LIBRARY SEARCH ---
   const filteredVideos = useMemo(() => {
     const term = videoSearch.trim().toLowerCase();
     if (!term) return videos;
@@ -325,10 +244,12 @@ export default function VideoDownloadView({ showToast }) {
 
       setVideos(result.videos);
       setVideoWarning(result.warning || '');
-      setSelectedVideo((current) => {
-        if (!current) return null;
-        return result.videos.find((item) => getAssetKey(item) === getAssetKey(current)) || null;
-      });
+      // Sync lại selectedVideos: giữ thứ tự, cập nhật data mới
+      setSelectedVideos((current) =>
+        current
+          .map(sel => result.videos.find(v => getAssetKey(v) === getAssetKey(sel)) || sel)
+          .filter(Boolean)
+      );
     } catch (error) {
       if (error?.name === 'AbortError' || signal?.aborted) return;
       setVideoWarning('');
@@ -344,6 +265,7 @@ export default function VideoDownloadView({ showToast }) {
     return () => controller.abort();
   }, [loadVideos]);
 
+  // Sync sliders when audio changes
   useEffect(() => {
     const nextDuration = Math.max(0, Number(audioAsset?.duration) || 0);
     setAudioDuration(nextDuration);
@@ -358,6 +280,57 @@ export default function VideoDownloadView({ showToast }) {
     extractAbortRef.current?.abort();
   }, []);
 
+  // --- AUTO MERGE HELPER (immediate) ---
+  const triggerAutoMerge = async (audio, videosArr, watermark) => {
+    // Hủy debounce đang chờ nếu có
+    if (mergeDebounceRef.current) {
+      clearTimeout(mergeDebounceRef.current);
+      mergeDebounceRef.current = null;
+    }
+    if (!audio || !videosArr || videosArr.length === 0) return;
+    setMerging(true);
+    setMergeError('');
+    setMergeWarning('');
+    setMergedVideo(null);
+
+    try {
+      const videoPointers = videosArr.map(v => toMediaPointer(v));
+      const result = await api.mergeAudioWithVideo(
+        toMediaPointer(audio),
+        videoPointers,
+        watermark ? toMediaPointer(watermark) : null
+      );
+      if (!result?.success || !result.video) {
+        throw new Error(result?.error || 'Không thể tự động ghép âm thanh với video.');
+      }
+
+      setMergedVideo(result.video);
+      setVideos((current) => [
+        result.video,
+        ...current.filter((item) => getAssetKey(item) !== getAssetKey(result.video))
+      ]);
+      setMergeWarning(result.warning || '');
+      if (showToast) showToast('Đã tự động ghép video thành công!', 'success');
+    } catch (error) {
+      const message = error.message || 'Không thể tự động ghép âm thanh với video.';
+      setMergeError(message);
+      if (showToast) showToast(message, 'error');
+    } finally {
+      setMerging(false);
+    }
+  };
+
+  // --- DEBOUNCED AUTO MERGE (dùng khi chọn/bỏ chọn/đổi thứ tự video) ---
+  // Chỉ thực sự merge sau 800ms ngừng thay đổi → tránh lưu video rác
+  const debouncedAutoMerge = (audio, videosArr, watermark, delay = 800) => {
+    if (mergeDebounceRef.current) clearTimeout(mergeDebounceRef.current);
+    mergeDebounceRef.current = setTimeout(() => {
+      mergeDebounceRef.current = null;
+      triggerAutoMerge(audio, videosArr, watermark);
+    }, delay);
+  };
+
+  // --- AUDIO EXTRACTION ---
   const runExtraction = async (inputValue) => {
     const targetUrl = normalizeUrl(inputValue);
     if (!targetUrl) {
@@ -383,7 +356,6 @@ export default function VideoDownloadView({ showToast }) {
     setAudioAsset(null);
     setOriginalAudioAsset(null);
     setMergedVideo(null);
-    setEditorOpen(false);
 
     try {
       const result = await api.extractAudio(targetUrl, controller.signal);
@@ -394,21 +366,15 @@ export default function VideoDownloadView({ showToast }) {
 
       setAudioAsset(result.audio);
       setOriginalAudioAsset(result.audio);
-      if (result.video) {
-        setSelectedVideo(result.video);
-        setVideos((current) => [
-          result.video,
-          ...current.filter((item) => getAssetKey(item) !== getAssetKey(result.video))
-        ]);
-      }
       setExtractWarning(result.warning || '');
-      if (showToast) {
-        if (result.video) {
-          showToast('Đã trích xuất thành công âm thanh và video không nhạc!', 'success');
-        } else {
-          showToast('Đã trích xuất âm thanh thành công!', 'success');
-        }
+      if (showToast) showToast('Đã trích xuất âm thanh thành công!', 'success');
+
+      // Chỉ lấy âm thanh. Nếu đã có video trong danh sách thì tự động ghép.
+      const existingVideos = selectedVideosRef.current;
+      if (existingVideos && existingVideos.length > 0) {
+        triggerAutoMerge(result.audio, existingVideos, watermarkAssetRef.current);
       }
+
     } catch (error) {
       if (error?.name === 'AbortError' || requestId !== extractSequenceRef.current) return;
       const message = error.message || 'Không thể trích xuất âm thanh từ liên kết này.';
@@ -460,12 +426,12 @@ export default function VideoDownloadView({ showToast }) {
     setExtractWarning('');
     setAudioAsset(null);
     setOriginalAudioAsset(null);
-    setEditorOpen(false);
     setMergedVideo(null);
     setMergeError('');
     setMergeWarning('');
   };
 
+  // --- AUDIO RANGE SLIDERS EVENTS ---
   const handleAudioMetadata = (event) => {
     const duration = Number(event.currentTarget.duration);
     if (!Number.isFinite(duration) || duration <= 0) return;
@@ -562,6 +528,11 @@ export default function VideoDownloadView({ showToast }) {
       setMergedVideo(null);
       setEditWarning(result.warning || '');
       if (showToast) showToast(`Đã xóa đoạn ${formatTime(deleteStart)} – ${formatTime(deleteEnd)}.`, 'success');
+      
+      // XONG TỰ ĐỘNG GHÉP LUÔN SAU KHI CẮT ÂM THANH
+      if (selectedVideosRef.current && selectedVideosRef.current.length > 0) {
+        triggerAutoMerge(result.audio, selectedVideosRef.current, watermarkAssetRef.current);
+      }
     } catch (error) {
       if (getAssetKey(audioAssetRef.current) !== sourceAudioKey) return;
       const message = error.message || 'Không thể chỉnh sửa âm thanh.';
@@ -584,6 +555,7 @@ export default function VideoDownloadView({ showToast }) {
     if (showToast) showToast('Đã khôi phục bản âm thanh gốc.', 'success');
   };
 
+  // --- VIDEO & WATERMARK HANDLERS ---
   const handleVideoFile = async (event) => {
     const file = event.target.files?.[0];
     event.target.value = '';
@@ -614,10 +586,22 @@ export default function VideoDownloadView({ showToast }) {
 
       const uploaded = result.video;
       setVideos((current) => [uploaded, ...current.filter((item) => getAssetKey(item) !== getAssetKey(uploaded))]);
-      setSelectedVideo(uploaded);
+      // Thêm video vừa upload vào danh sách đã chọn
+      setSelectedVideos((current) => {
+        const alreadySelected = current.some(v => getAssetKey(v) === getAssetKey(uploaded));
+        return alreadySelected ? current : [...current, uploaded];
+      });
       setMergedVideo(null);
       setVideoWarning(result.warning || '');
-      if (showToast) showToast(`Đã tải lên ${getAssetName(uploaded)} thành công và tự động chọn video.`, 'success');
+      if (showToast) showToast(`Đã tải lên ${getAssetName(uploaded)} và thêm vào danh sách video.`, 'success');
+
+      // TỰ ĐỘNG GHÉP NẾU CÓ ÂM THANH SẴN
+      if (audioAssetRef.current) {
+        const nextSelected = [...selectedVideosRef.current];
+        const alreadyIn = nextSelected.some(v => getAssetKey(v) === getAssetKey(uploaded));
+        const finalList = alreadyIn ? nextSelected : [...nextSelected, uploaded];
+        triggerAutoMerge(audioAssetRef.current, finalList, watermarkAssetRef.current);
+      }
     } catch (error) {
       const message = error.message || 'Không thể tải video lên.';
       setVideoError(message);
@@ -628,61 +612,173 @@ export default function VideoDownloadView({ showToast }) {
     }
   };
 
-  const selectVideo = (video) => {
-    setSelectedVideo(video);
+  // Toggle video vào/ra danh sách đã chọn (multi-select)
+  const toggleVideoSelection = (video) => {
+    const key = getAssetKey(video);
+    const isSelected = selectedVideos.some(v => getAssetKey(v) === key);
+    const nextSelected = isSelected
+      ? selectedVideos.filter(v => getAssetKey(v) !== key)
+      : [...selectedVideos, video];
+
+    setSelectedVideos(nextSelected);
     setMergedVideo(null);
     setMergeError('');
     setMergeWarning('');
+
+    // Dùng debounce: chứ 800ms sau thao tác cuối mới merge
+    if (nextSelected.length > 0 && audioAssetRef.current) {
+      debouncedAutoMerge(audioAssetRef.current, nextSelected, watermarkAssetRef.current);
+    }
   };
 
-  const mergeMedia = async () => {
-    if (!audioAsset || !selectedVideo) {
-      setMergeError('Hãy chuẩn bị âm thanh và chọn một video trước khi ghép.');
+  // Di chuyển video trong danh sách đã chọn (lên / xuống)
+  const moveSelectedVideo = (index, direction) => {
+    const nextSelected = [...selectedVideos];
+    const swapIndex = index + direction;
+    if (swapIndex < 0 || swapIndex >= nextSelected.length) return;
+    [nextSelected[index], nextSelected[swapIndex]] = [nextSelected[swapIndex], nextSelected[index]];
+    setSelectedVideos(nextSelected);
+    setMergedVideo(null);
+    setMergeError('');
+    setMergeWarning('');
+    // Dùng debounce: chứ 800ms sau thao tác cuối mới merge
+    if (audioAssetRef.current) {
+      debouncedAutoMerge(audioAssetRef.current, nextSelected, watermarkAssetRef.current);
+    }
+  };
+
+  // Xóa video khỏi danh sách đã chọn
+  const removeFromSelected = (index) => {
+    const nextSelected = selectedVideos.filter((_, i) => i !== index);
+    setSelectedVideos(nextSelected);
+    setMergedVideo(null);
+    setMergeError('');
+    setMergeWarning('');
+    if (nextSelected.length > 0 && audioAssetRef.current) {
+      debouncedAutoMerge(audioAssetRef.current, nextSelected, watermarkAssetRef.current);
+    }
+  };
+
+  const handleWatermarkFile = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    const looksLikeImage = file.type.startsWith('image/') || /\.(png|jpg|jpeg|webp)$/i.test(file.name);
+    if (!looksLikeImage) {
+      setWatermarkError('Vui lòng chọn file ảnh PNG, JPG, JPEG hoặc WebP.');
       return;
     }
 
-    const sourceAudioKey = getAssetKey(audioAsset);
-    const sourceVideoKey = getAssetKey(selectedVideo);
-    setMerging(true);
+    setUploadingWatermark(true);
+    setWatermarkError('');
     setMergeError('');
     setMergeWarning('');
-    setMergedVideo(null);
 
     try {
-      const result = await api.mergeAudioWithVideo(
-        toMediaPointer(audioAsset),
-        toMediaPointer(selectedVideo)
-      );
-      if (!result?.success || !result.video) {
-        throw new Error(result?.error || 'Không thể ghép âm thanh với video.');
+      const result = await api.uploadWatermark(file);
+      if (!result?.success || !result.watermark) {
+        throw new Error(result?.error || 'Không thể tải ảnh watermark lên.');
       }
-      if (
-        getAssetKey(audioAssetRef.current) !== sourceAudioKey ||
-        getAssetKey(selectedVideoRef.current) !== sourceVideoKey
-      ) return;
 
-      setMergedVideo(result.video);
-      setVideos((current) => [
-        result.video,
-        ...current.filter((item) => getAssetKey(item) !== getAssetKey(result.video))
-      ]);
-      setMergeWarning(result.warning || '');
-      if (showToast) showToast('Ghép âm thanh và video thành công!', 'success');
+      setWatermarkAsset(result.watermark);
+      if (showToast) showToast('Đã tải ảnh logo/watermark lên thành công!', 'success');
+
+      // TỰ ĐỘNG GHÉP NẾU CÓ CẢ VIDEO VÀ ÂM THANH SẴN
+      if (audioAssetRef.current && selectedVideosRef.current && selectedVideosRef.current.length > 0) {
+        triggerAutoMerge(audioAssetRef.current, selectedVideosRef.current, result.watermark);
+      }
     } catch (error) {
-      if (
-        getAssetKey(audioAssetRef.current) !== sourceAudioKey ||
-        getAssetKey(selectedVideoRef.current) !== sourceVideoKey
-      ) return;
-      const message = error.message || 'Không thể ghép âm thanh với video.';
-      setMergeError(message);
+      const message = error.message || 'Không thể tải ảnh logo/watermark lên.';
+      setWatermarkError(message);
       if (showToast) showToast(message, 'error');
     } finally {
-      setMerging(false);
+      setUploadingWatermark(false);
+    }
+  };
+
+  // --- MANUAL MERGE ACTION ---
+  const mergeMedia = async () => {
+    if (!audioAsset || selectedVideos.length === 0) {
+      setMergeError('Hãy chuẩn bị âm thanh và chọn ít nhất một video trước khi ghép.');
+      return;
+    }
+    triggerAutoMerge(audioAsset, selectedVideos, watermarkAsset);
+  };
+
+  // --- PERSIST ACTIONS ---
+  const handlePersistAudio = async () => {
+    if (!audioAsset || audioAsset.storageProvider !== 'local') return;
+    setPersistingAudio(true);
+    try {
+      const res = await api.persistRemoteMedia(audioAsset.localFileName, 'audio');
+      if (res.success && res.asset) {
+        setAudioAsset(res.asset);
+        if (originalAudioAsset && originalAudioAsset.localFileName === audioAsset.localFileName) {
+          setOriginalAudioAsset(res.asset);
+        }
+        if (showToast) showToast('Đã tải âm thanh lên Supabase thành công!', 'success');
+      } else {
+        throw new Error(res.error || 'Lưu thất bại.');
+      }
+    } catch (err) {
+      if (showToast) showToast(err.message || 'Lỗi khi tải lên Supabase.', 'error');
+    } finally {
+      setPersistingAudio(false);
+    }
+  };
+
+  const handlePersistVideo = async () => {
+    // Lưu tất cả video local trong selectedVideos lên Supabase
+    const localVideos = selectedVideos.filter(v => v.storageProvider === 'local');
+    if (localVideos.length === 0) return;
+    setPersistingVideo(true);
+    try {
+      const updated = await Promise.all(
+        localVideos.map(v => api.persistRemoteMedia(v.localFileName, 'video'))
+      );
+      const successAssets = updated.filter(r => r.success && r.asset).map(r => r.asset);
+      if (successAssets.length > 0) {
+        setSelectedVideos(current =>
+          current.map(v => {
+            const upd = successAssets.find(a => a.fileName === v.localFileName || a.originalName === v.localFileName);
+            return upd || v;
+          })
+        );
+        setVideos(current => [
+          ...successAssets,
+          ...current.filter(v => !successAssets.some(a => getAssetKey(a) === getAssetKey(v)))
+        ]);
+        if (showToast) showToast(`Đã tải ${successAssets.length} video lên Supabase thành công!`, 'success');
+      }
+    } catch (err) {
+      if (showToast) showToast(err.message || 'Lỗi khi tải lên Supabase.', 'error');
+    } finally {
+      setPersistingVideo(false);
+    }
+  };
+
+  // Xóa video khỏi thư viện
+  const handleDeleteVideo = async (video) => {
+    const key = getAssetKey(video);
+    // Xóa khỏi danh sách đã chọn trước
+    setSelectedVideos(current => current.filter(v => getAssetKey(v) !== key));
+    setVideos(current => current.filter(v => getAssetKey(v) !== key));
+    try {
+      await api.deleteMedia({
+        storageProvider: video.storageProvider,
+        storagePath: video.storagePath,
+        localFileName: video.localFileName,
+        type: 'video'
+      });
+    } catch (_) {
+      // Bỏ qua lỗi xóa - UI đã cập nhật
     }
   };
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-4 sm:p-8">
+      {/* GLOW DECORATIONS & HEADER */}
       <section className="glass-effect relative overflow-hidden rounded-3xl border border-[var(--glass-border)] p-6 sm:p-8">
         <div className="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full bg-indigo-500/10 blur-3xl" />
         <div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
@@ -693,629 +789,598 @@ export default function VideoDownloadView({ showToast }) {
               </div>
               <div>
                 <span className="text-[10px] font-bold uppercase tracking-[0.24em] text-indigo-400">Media Studio</span>
-                <h1 className="mt-1 text-xl font-bold text-[var(--text-main)] sm:text-2xl">Trích âm thanh & ghép video</h1>
+                <h1 className="mt-1 text-xl font-bold text-[var(--text-main)] sm:text-2xl">
+                  Bảng Điều Khiển Video Tự Động
+                </h1>
               </div>
             </div>
             <p className="text-sm leading-relaxed text-[var(--text-muted)]">
-              Dán liên kết để tự động lấy âm thanh, xóa đoạn không cần thiết, rồi ghép với video bạn chọn trong Supabase.
+              Dán liên kết lấy âm thanh, chọn video nền và logo để ghép tự động. Bạn có thể sử dụng thanh trượt bên dưới để cắt bỏ một đoạn âm thanh tùy chọn bất cứ lúc nào.
             </p>
-          </div>
-
-          <div className="grid grid-cols-4 gap-2 rounded-2xl border border-[var(--input-border)] bg-[var(--input-bg)] p-2">
-            {[
-              { value: 1, done: Boolean(audioAsset), label: 'Lấy âm' },
-              { value: 2, done: Boolean(audioAsset), label: 'Chỉnh sửa' },
-              { value: 3, done: Boolean(selectedVideo), label: 'Chọn video' },
-              { value: 4, done: Boolean(mergedVideo), label: 'Ghép' }
-            ].map((step) => (
-              <div key={step.value} className="flex min-w-14 flex-col items-center gap-1 rounded-xl px-2 py-2 text-center">
-                <span className={`flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold ${
-                  step.done ? 'bg-emerald-500 text-white' : 'bg-[var(--active-menu-bg)] text-[var(--text-muted)]'
-                }`}>
-                  {step.done ? <CheckCircle2 size={13} /> : step.value}
-                </span>
-                <span className="hidden text-[9px] font-semibold text-[var(--text-muted)] sm:block">{step.label}</span>
-              </div>
-            ))}
           </div>
         </div>
       </section>
 
-      <section className="glass-effect rounded-3xl border border-[var(--glass-border)] p-5 sm:p-7">
-        <StepHeader
-          number="1"
-          icon={<Link2 size={20} />}
-          title="Dán liên kết để lấy âm thanh"
-          description="Hệ thống tự xử lý ngay khi bạn dán link. Nút thủ công bên dưới dùng khi bạn nhập hoặc sửa link bằng bàn phím."
-          complete={Boolean(audioAsset)}
-          busy={extracting}
-        />
-
-        <form onSubmit={handleLinkSubmit} className="mt-5 flex flex-col gap-3">
-          <label htmlFor="media-source-url" className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
-            Link YouTube, TikTok, Facebook hoặc video trực tiếp
-          </label>
-          <div className="flex flex-col gap-3 lg:flex-row">
-            <div className="relative min-w-0 flex-1">
-              <Link2 size={17} className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
-              <input
-                id="media-source-url"
-                type="url"
-                value={url}
-                onChange={(event) => {
-                  setUrl(event.target.value);
-                  setExtractError('');
-                }}
-                onPaste={handleInputPaste}
-                placeholder="https://www.youtube.com/watch?v=..."
-                disabled={extracting}
-                className="w-full rounded-xl border border-[var(--input-border)] bg-[var(--input-bg)] py-3.5 pl-11 pr-12 text-sm text-[var(--text-main)] outline-none transition focus:border-indigo-500 disabled:opacity-60"
-              />
-              {url && !extracting && (
-                <button
-                  type="button"
-                  onClick={clearSource}
-                  className="absolute right-3 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg text-[var(--text-muted)] transition hover:bg-rose-500/10 hover:text-rose-400"
-                  title="Xóa liên kết"
-                >
-                  <X size={15} />
-                </button>
-              )}
+      {/* DASHBOARD COLUMNS */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+        {/* LEFT COLUMN: AUDIO & CUTTER */}
+        <div className="flex flex-col gap-6 lg:col-span-6">
+          {/* STEP 1: AUDIO SOURCE & EXTRACTION */}
+          <div className="glass-effect flex flex-col gap-4 rounded-3xl border border-[var(--glass-border)] p-5 sm:p-6">
+            <div className="flex items-center gap-2 border-b border-[var(--border-main)] pb-3">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-500/10 text-indigo-400">
+                <Link2 size={16} />
+              </div>
+              <h2 className="text-sm font-bold text-[var(--text-main)]">1. Nguồn âm thanh & Công cụ cắt đoạn</h2>
             </div>
 
-            <button
-              type="button"
-              onClick={handleClipboardPaste}
-              disabled={extracting}
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--active-menu-border)] bg-[var(--active-menu-bg)] px-4 py-3 text-xs font-bold text-[var(--text-main)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <Clipboard size={16} /> Dán link
-            </button>
-            <button
-              type="submit"
-              disabled={extracting || !url.trim()}
-              className="inline-flex min-w-48 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-xs font-bold text-white shadow-lg shadow-indigo-950/20 transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {extracting ? <Loader2 size={17} className="animate-spin" /> : <Sparkles size={17} />}
-              {extracting ? 'Đang trích xuất...' : 'Trích xuất âm thanh'}
-            </button>
-          </div>
-
-          {extracting && (
-            <div className="flex items-center gap-3 rounded-xl border border-indigo-500/20 bg-indigo-500/10 px-4 py-3 text-xs text-indigo-300">
-              <Loader2 size={16} className="shrink-0 animate-spin" />
-              <span>Đang tải nguồn, tách âm thanh và lưu vào thư viện media. Bạn có thể tiếp tục xem trang trong lúc chờ.</span>
-            </div>
-          )}
-          <WarningNotice message={extractWarning} />
-          <ErrorNotice message={extractError} />
-        </form>
-      </section>
-
-      <section className="glass-effect rounded-3xl border border-[var(--glass-border)] p-5 sm:p-7">
-        <StepHeader
-          number="2"
-          icon={<Scissors size={20} />}
-          title="Nghe và chỉnh sửa âm thanh"
-          description="Chọn thời điểm bắt đầu và kết thúc của đoạn muốn xóa. Mỗi lần chỉnh sửa tạo một bản mới nên file gốc luôn được giữ lại."
-          complete={Boolean(audioAsset)}
-          busy={editingAudio}
-        />
-
-        <div className="mt-5">
-          {!audioAsset ? (
-            <EmptyState
-              icon={<FileAudio size={24} />}
-              title="Chưa có âm thanh"
-              description="Hoàn thành bước 1 để mở trình phát và công cụ cắt âm thanh."
-            />
-          ) : (
-            <div className="flex flex-col gap-5">
-              <div className="rounded-2xl border border-[var(--input-border)] bg-[var(--input-bg)] p-4 sm:p-5">
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-violet-500/25 bg-violet-500/10 text-violet-400">
-                      <Music size={21} />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="truncate text-sm font-bold text-[var(--text-main)]" title={getAssetName(audioAsset)}>
-                          {getAssetName(audioAsset)}
-                        </h3>
-                        {isEditedAudio && (
-                          <span className="rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-400">
-                            Bản đã sửa
-                          </span>
-                        )}
-                      </div>
-                      <p className="mt-1 text-[11px] text-[var(--text-muted)]">
-                        {audioDuration > 0 ? `Thời lượng ${formatTime(audioDuration)}` : 'Đang đọc thời lượng...'}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    {audioAsset?.storageProvider === 'local' && (
-                      <button
-                        type="button"
-                        onClick={handlePersistAudio}
-                        disabled={persistingAudio || editingAudio}
-                        className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-3.5 py-2.5 text-xs font-bold text-white transition hover:bg-violet-500 disabled:opacity-50"
-                      >
-                        {persistingAudio ? (
-                          <Loader2 className="animate-spin" size={15} />
-                        ) : (
-                          <CloudUpload size={15} />
-                        )}
-                        Lưu Supabase
-                      </button>
-                    )}
-                    {isEditedAudio && (
-                      <button
-                        type="button"
-                        onClick={restoreOriginalAudio}
-                        disabled={editingAudio || persistingAudio}
-                        className="inline-flex items-center gap-2 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3.5 py-2.5 text-xs font-bold text-amber-400 transition hover:bg-amber-500/15 disabled:opacity-50"
-                      >
-                        <RotateCcw size={15} /> Khôi phục bản gốc
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => setEditorOpen((current) => !current)}
-                      disabled={persistingAudio}
-                      className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2.5 text-xs font-bold transition ${
-                        editorOpen
-                          ? 'bg-zinc-600 text-white hover:bg-zinc-500'
-                          : 'bg-indigo-600 text-white hover:bg-indigo-500'
-                      }`}
-                    >
-                      {editorOpen ? <X size={15} /> : <Edit3 size={15} />}
-                      {editorOpen ? 'Đóng chỉnh sửa' : 'Chỉnh sửa'}
-                    </button>
-                  </div>
-                </div>
-
-                {currentAudioUrl ? (
-                  <audio
-                    key={currentAudioKey}
-                    ref={audioRef}
-                    src={currentAudioUrl}
-                    controls
-                    preload="metadata"
-                    onLoadedMetadata={handleAudioMetadata}
-                    onTimeUpdate={handleAudioTimeUpdate}
-                    onPause={() => setPreviewingSelection(false)}
-                    onEnded={() => setPreviewingSelection(false)}
-                    className="mt-4 w-full"
+            <form onSubmit={handleLinkSubmit} className="flex flex-col gap-3">
+              <label htmlFor="media-source-url" className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                Link YouTube, TikTok, Facebook hoặc Video trực tiếp
+              </label>
+              <div className="flex gap-2">
+                <input
+                  id="media-source-url"
+                  type="url"
+                  value={url}
+                  onChange={(event) => {
+                    setUrl(event.target.value);
+                    setExtractError('');
+                  }}
+                  onPaste={handleInputPaste}
+                  placeholder="https://www.youtube.com/watch?v=..."
+                  disabled={extracting || merging}
+                  className="w-full flex-1 rounded-xl border border-[var(--input-border)] bg-[var(--input-bg)] py-3 px-4 text-xs text-[var(--text-main)] outline-none transition focus:border-indigo-500 disabled:opacity-60"
+                />
+                {url && !extracting && (
+                  <button
+                    type="button"
+                    onClick={clearSource}
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[var(--input-border)] bg-[var(--input-bg)] text-[var(--text-muted)] hover:text-rose-400 transition"
+                    title="Xóa liên kết"
                   >
-                    Trình duyệt không hỗ trợ phát âm thanh.
-                  </audio>
-                ) : (
-                  <div className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-xs text-amber-400">
-                    Backend chưa trả về public URL để phát âm thanh này.
-                  </div>
+                    <X size={16} />
+                  </button>
                 )}
               </div>
 
-              {editorOpen && (
-                <div className="rounded-2xl border border-indigo-500/20 bg-indigo-500/[0.04] p-4 sm:p-6">
-                  <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <h3 className="flex items-center gap-2 text-sm font-bold text-[var(--text-main)]">
-                        <Scissors size={16} className="text-indigo-400" /> Chọn đoạn muốn xóa
-                      </h3>
-                      <p className="mt-1 text-[11px] text-[var(--text-muted)]">
-                        Vị trí đang phát: <strong className="text-[var(--text-main)]">{formatTime(playbackTime)}</strong>
-                      </p>
-                    </div>
-                    <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs font-bold text-rose-400">
-                      Sẽ xóa {formatTime(selectionLength)}
-                    </div>
-                  </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleClipboardPaste}
+                  disabled={extracting || merging}
+                  className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--active-menu-border)] bg-[var(--active-menu-bg)] py-3 text-xs font-bold text-[var(--text-main)] transition hover:brightness-110 disabled:opacity-50"
+                >
+                  <Clipboard size={14} /> Dán link
+                </button>
+                <button
+                  type="submit"
+                  disabled={extracting || !url.trim() || merging}
+                  className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl bg-indigo-600 py-3 text-xs font-bold text-white shadow-lg shadow-indigo-950/20 transition hover:bg-indigo-500 disabled:opacity-50"
+                >
+                  {extracting ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                  Trích xuất
+                </button>
+              </div>
+              <WarningNotice message={extractWarning} />
+              <ErrorNotice message={extractError} />
+            </form>
 
-                  <div className="relative mb-6 h-10 overflow-hidden rounded-xl border border-[var(--input-border)] bg-[var(--input-bg)]">
-                    <div className="absolute inset-y-0 left-0 bg-emerald-500/10" style={{ width: `${audioDuration ? (deleteStart / audioDuration) * 100 : 0}%` }} />
-                    <div
-                      className="absolute inset-y-0 border-x border-rose-400/40 bg-rose-500/25"
-                      style={{
-                        left: `${audioDuration ? (deleteStart / audioDuration) * 100 : 0}%`,
-                        width: `${audioDuration ? (selectionLength / audioDuration) * 100 : 0}%`
-                      }}
-                    />
-                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
-                      Vùng màu đỏ sẽ bị xóa
-                    </div>
-                  </div>
-
-                  <div className="grid gap-5 lg:grid-cols-2">
-                    <div className="rounded-xl border border-[var(--input-border)] bg-[var(--input-bg)] p-4">
-                      <div className="mb-3 flex items-center justify-between gap-3">
-                        <label htmlFor="delete-start-number" className="text-xs font-bold text-[var(--text-main)]">Điểm bắt đầu</label>
-                        <span className="font-mono text-xs font-bold text-indigo-400">{formatTime(deleteStart)}</span>
+            {/* Audio info & MANUALLY VISIBLE EDITOR */}
+            {audioAsset && (
+              <div className="mt-2 flex flex-col gap-4">
+                <div className="rounded-2xl border border-[var(--input-border)] bg-[var(--input-bg)] p-4">
+                  <div className="flex items-center justify-between gap-3 mb-3">
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <Music size={16} className="text-violet-400 shrink-0" />
+                      <div className="min-w-0">
+                        <span className="block truncate text-xs font-bold" title={getAssetName(audioAsset)}>
+                          {getAssetName(audioAsset)}
+                        </span>
+                        <span className="text-[10px] text-[var(--text-muted)]">
+                          {audioDuration > 0 ? `Thời lượng: ${formatTime(audioDuration)}` : 'Đang đọc thời lượng...'}
+                        </span>
                       </div>
-                      <input
-                        type="range"
-                        min="0"
-                        max={Math.max(audioDuration, MIN_SEGMENT_SECONDS)}
-                        step="0.01"
-                        value={deleteStart}
-                        onChange={(event) => updateDeleteStart(event.target.value)}
-                        disabled={!audioDuration || editingAudio}
-                        className="w-full accent-indigo-500 disabled:opacity-40"
+                    </div>
+
+                    <div className="flex gap-1 shrink-0">
+                      {audioAsset?.storageProvider === 'local' && (
+                        <button
+                          type="button"
+                          onClick={handlePersistAudio}
+                          disabled={persistingAudio || editingAudio || merging}
+                          className="p-1.5 rounded-lg bg-violet-600/10 text-violet-400 hover:bg-violet-600/20 transition"
+                          title="Lưu lên Supabase"
+                        >
+                          {persistingAudio ? <Loader2 className="animate-spin" size={13} /> : <CloudUpload size={13} />}
+                        </button>
+                      )}
+                      {isEditedAudio && (
+                        <button
+                          type="button"
+                          onClick={restoreOriginalAudio}
+                          disabled={editingAudio || merging}
+                          className="p-1.5 rounded-lg bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition"
+                          title="Khôi phục gốc"
+                        >
+                          <RotateCcw size={13} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {currentAudioUrl && (
+                    <audio
+                      key={currentAudioKey}
+                      ref={audioRef}
+                      src={currentAudioUrl}
+                      controls
+                      preload="metadata"
+                      onLoadedMetadata={handleAudioMetadata}
+                      onTimeUpdate={handleAudioTimeUpdate}
+                      onPause={() => setPreviewingSelection(false)}
+                      onEnded={() => setPreviewingSelection(false)}
+                      className="w-full h-8"
+                    />
+                  )}
+                </div>
+
+                {/* Range Sliders Audio Cutter (Permanently visible when audio exists) */}
+                <div className="rounded-2xl border border-indigo-500/20 bg-indigo-500/[0.03] p-4 flex flex-col gap-4">
+                  <div className="flex items-center gap-1.5 border-b border-[var(--border-main)] pb-2 text-indigo-400">
+                    <Scissors size={14} />
+                    <span className="text-xs font-bold">Cắt bỏ đoạn âm thanh đã chọn</span>
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    <div className="flex justify-between text-[10px] text-[var(--text-muted)] font-medium">
+                      <span>Vị trí hiện tại: {formatTime(playbackTime)}</span>
+                      <span className="text-rose-400 font-bold">Sẽ xóa {formatTime(selectionLength)}</span>
+                    </div>
+
+                    <div className="relative h-6 overflow-hidden rounded-xl border border-[var(--input-border)] bg-[var(--input-bg)]">
+                      <div className="absolute inset-y-0 left-0 bg-emerald-500/10" style={{ width: `${audioDuration ? (deleteStart / audioDuration) * 100 : 0}%` }} />
+                      <div
+                        className="absolute inset-y-0 border-x border-rose-400/40 bg-rose-500/25"
+                        style={{
+                          left: `${audioDuration ? (deleteStart / audioDuration) * 100 : 0}%`,
+                          width: `${audioDuration ? (selectionLength / audioDuration) * 100 : 0}%`
+                        }}
                       />
-                      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4 mt-1">
+                      <div className="flex flex-col gap-1 p-2 rounded-xl border border-[var(--input-border)] bg-[var(--input-bg)]">
+                        <span className="text-[9px] font-bold uppercase text-[var(--text-muted)]">Điểm bắt đầu</span>
                         <input
-                          id="delete-start-number"
-                          type="number"
+                          type="range"
                           min="0"
-                          max={Math.max(0, deleteEnd - MIN_SEGMENT_SECONDS)}
-                          step="0.1"
-                          value={Number(deleteStart.toFixed(2))}
+                          max={Math.max(audioDuration, MIN_SEGMENT_SECONDS)}
+                          step="0.01"
+                          value={deleteStart}
                           onChange={(event) => updateDeleteStart(event.target.value)}
                           disabled={!audioDuration || editingAudio}
-                          className="min-w-0 flex-1 rounded-lg border border-[var(--input-border)] bg-[var(--bg-main)] px-3 py-2 text-xs text-[var(--text-main)] outline-none focus:border-indigo-500"
+                          className="w-full accent-indigo-500"
                         />
-                        <button
-                          type="button"
-                          onClick={setStartFromPlayback}
-                          disabled={!audioDuration || editingAudio}
-                          className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-[var(--active-menu-border)] bg-[var(--active-menu-bg)] px-3 py-2 text-[11px] font-bold text-[var(--text-main)] disabled:opacity-40"
-                        >
-                          <Clock size={13} /> Dùng vị trí đang phát
-                        </button>
+                        <div className="flex gap-1.5 mt-1.5">
+                          <input
+                            type="number"
+                            min="0"
+                            max={Math.max(0, deleteEnd - MIN_SEGMENT_SECONDS)}
+                            step="0.1"
+                            value={Number(deleteStart.toFixed(2))}
+                            onChange={(event) => updateDeleteStart(event.target.value)}
+                            disabled={!audioDuration || editingAudio}
+                            className="w-full rounded border border-[var(--input-border)] bg-[var(--bg-main)] px-2 py-1 text-[11px] text-[var(--text-main)] outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={setStartFromPlayback}
+                            disabled={!audioDuration || editingAudio}
+                            className="px-3 border border-[var(--active-menu-border)] bg-[var(--active-menu-bg)] rounded-lg text-[10px] font-bold text-[var(--text-main)] whitespace-nowrap transition hover:brightness-110"
+                          >
+                            Dùng vị trí đang phát
+                          </button>
+                        </div>
                       </div>
-                    </div>
 
-                    <div className="rounded-xl border border-[var(--input-border)] bg-[var(--input-bg)] p-4">
-                      <div className="mb-3 flex items-center justify-between gap-3">
-                        <label htmlFor="delete-end-number" className="text-xs font-bold text-[var(--text-main)]">Điểm kết thúc</label>
-                        <span className="font-mono text-xs font-bold text-indigo-400">{formatTime(deleteEnd)}</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="0"
-                        max={Math.max(audioDuration, MIN_SEGMENT_SECONDS)}
-                        step="0.01"
-                        value={deleteEnd}
-                        onChange={(event) => updateDeleteEnd(event.target.value)}
-                        disabled={!audioDuration || editingAudio}
-                        className="w-full accent-indigo-500 disabled:opacity-40"
-                      />
-                      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                      <div className="flex flex-col gap-1 p-2 rounded-xl border border-[var(--input-border)] bg-[var(--input-bg)]">
+                        <span className="text-[9px] font-bold uppercase text-[var(--text-muted)]">Điểm kết thúc</span>
                         <input
-                          id="delete-end-number"
-                          type="number"
-                          min={Math.min(audioDuration, deleteStart + MIN_SEGMENT_SECONDS)}
-                          max={audioDuration}
-                          step="0.1"
-                          value={Number(deleteEnd.toFixed(2))}
+                          type="range"
+                          min="0"
+                          max={Math.max(audioDuration, MIN_SEGMENT_SECONDS)}
+                          step="0.01"
+                          value={deleteEnd}
                           onChange={(event) => updateDeleteEnd(event.target.value)}
                           disabled={!audioDuration || editingAudio}
-                          className="min-w-0 flex-1 rounded-lg border border-[var(--input-border)] bg-[var(--bg-main)] px-3 py-2 text-xs text-[var(--text-main)] outline-none focus:border-indigo-500"
+                          className="w-full accent-indigo-500"
                         />
-                        <button
-                          type="button"
-                          onClick={setEndFromPlayback}
-                          disabled={!audioDuration || editingAudio}
-                          className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-[var(--active-menu-border)] bg-[var(--active-menu-bg)] px-3 py-2 text-[11px] font-bold text-[var(--text-main)] disabled:opacity-40"
-                        >
-                          <Clock size={13} /> Dùng vị trí đang phát
-                        </button>
+                        <div className="flex gap-1.5 mt-1.5">
+                          <input
+                            type="number"
+                            min={Math.min(audioDuration, deleteStart + MIN_SEGMENT_SECONDS)}
+                            max={audioDuration}
+                            step="0.1"
+                            value={Number(deleteEnd.toFixed(2))}
+                            onChange={(event) => updateDeleteEnd(event.target.value)}
+                            disabled={!audioDuration || editingAudio}
+                            className="w-full rounded border border-[var(--input-border)] bg-[var(--bg-main)] px-2 py-1 text-[11px] text-[var(--text-main)] outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={setEndFromPlayback}
+                            disabled={!audioDuration || editingAudio}
+                            className="px-3 border border-[var(--active-menu-border)] bg-[var(--active-menu-bg)] rounded-lg text-[10px] font-bold text-[var(--text-main)] whitespace-nowrap transition hover:brightness-110"
+                          >
+                            Dùng vị trí đang phát
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <button
-                      type="button"
-                      onClick={previewingSelection ? stopSelectionPreview : previewSelectedSegment}
-                      disabled={!currentAudioUrl || selectionLength < MIN_SEGMENT_SECONDS || editingAudio}
-                      className="inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--active-menu-border)] bg-[var(--active-menu-bg)] px-4 py-3 text-xs font-bold text-[var(--text-main)] disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      {previewingSelection ? <Pause size={15} /> : <Play size={15} />}
-                      {previewingSelection ? 'Dừng nghe thử' : 'Nghe thử đoạn đã chọn'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={removeSelectedSegment}
-                      disabled={editingAudio || !audioDuration || selectionLength < MIN_SEGMENT_SECONDS}
-                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-rose-600 px-5 py-3 text-xs font-bold text-white shadow-lg shadow-rose-950/20 transition hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      {editingAudio ? <Loader2 size={16} className="animate-spin" /> : <Scissors size={16} />}
-                      {editingAudio ? 'Đang tạo bản âm thanh mới...' : 'Xóa đoạn đã chọn'}
-                    </button>
-                  </div>
-                  <div className="mt-4 flex flex-col gap-3">
+                    <div className="flex justify-between items-center mt-3 gap-2">
+                      <button
+                        type="button"
+                        onClick={previewingSelection ? stopSelectionPreview : previewSelectedSegment}
+                        disabled={!currentAudioUrl || selectionLength < MIN_SEGMENT_SECONDS || editingAudio}
+                        className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--active-menu-border)] bg-[var(--active-menu-bg)] px-3 py-2 text-xs font-bold text-[var(--text-main)] disabled:opacity-40"
+                      >
+                        {previewingSelection ? <Pause size={13} /> : <Play size={13} />}
+                        Nghe thử
+                      </button>
+                      <button
+                        type="button"
+                        onClick={removeSelectedSegment}
+                        disabled={editingAudio || !audioDuration || selectionLength < MIN_SEGMENT_SECONDS}
+                        className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-rose-600 px-4 py-2 text-xs font-bold text-white transition hover:bg-rose-500 disabled:opacity-40"
+                      >
+                        {editingAudio ? <Loader2 size={13} className="animate-spin" /> : <Scissors size={13} />}
+                        Xóa đoạn đã chọn & Ghép lại
+                      </button>
+                    </div>
                     <WarningNotice message={editWarning} />
                     <ErrorNotice message={editError} />
                   </div>
                 </div>
-              )}
-            </div>
-          )}
-        </div>
-      </section>
-
-      <section className="glass-effect rounded-3xl border border-[var(--glass-border)] p-5 sm:p-7">
-        <StepHeader
-          number="3"
-          icon={<Video size={20} />}
-          title="Tải lên hoặc chọn video Supabase"
-          description="Video tải lên sẽ được lưu trong Supabase Storage. Bạn cũng có thể chọn lại một video đã có trong thư viện."
-          complete={Boolean(selectedVideo)}
-          busy={videosLoading || uploadingVideo}
-        />
-
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="video/mp4,video/quicktime,video/x-m4v,video/webm,.mp4,.mov,.m4v,.webm"
-          onChange={handleVideoFile}
-          className="hidden"
-        />
-
-        <div className="mt-5 flex flex-col gap-4">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div className="relative min-w-0 flex-1 lg:max-w-md">
-              <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
-              <input
-                type="search"
-                value={videoSearch}
-                onChange={(event) => setVideoSearch(event.target.value)}
-                placeholder="Tìm theo tên video..."
-                className="w-full rounded-xl border border-[var(--input-border)] bg-[var(--input-bg)] py-3 pl-10 pr-4 text-xs text-[var(--text-main)] outline-none focus:border-indigo-500"
-              />
-            </div>
-
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <button
-                type="button"
-                onClick={() => loadVideos()}
-                disabled={videosLoading || uploadingVideo}
-                className="inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--active-menu-border)] bg-[var(--active-menu-bg)] px-4 py-3 text-xs font-bold text-[var(--text-main)] disabled:opacity-50"
-              >
-                <RefreshCw size={15} className={videosLoading ? 'animate-spin' : ''} /> Làm mới thư viện
-              </button>
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploadingVideo || videosLoading}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-xs font-bold text-white transition hover:bg-indigo-500 disabled:opacity-50"
-              >
-                {uploadingVideo ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
-                {uploadingVideo ? `Đang tải ${uploadName || 'video'}...` : 'Tải video lên'}
-              </button>
-            </div>
+              </div>
+            )}
           </div>
+        </div>
 
-          <ErrorNotice message={videoError} />
-          <WarningNotice message={videoWarning} />
-
-          {videosLoading ? (
-            <div className="flex min-h-48 flex-col items-center justify-center gap-3 rounded-2xl border border-[var(--input-border)] bg-[var(--input-bg)] text-xs text-[var(--text-muted)]">
-              <Loader2 size={26} className="animate-spin text-indigo-400" />
-              Đang đồng bộ thư viện Supabase...
+        {/* RIGHT COLUMN: VIDEO, LOGO, ACTION, RESULT */}
+        <div className="flex flex-col gap-6 lg:col-span-6">
+          {/* STEP 2: VIDEO SOURCE SELECTION */}
+          <div className="glass-effect flex flex-col gap-4 rounded-3xl border border-[var(--glass-border)] p-5 sm:p-6">
+            <div className="flex items-center gap-2 border-b border-[var(--border-main)] pb-3">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-500/10 text-indigo-400">
+                <Video size={16} />
+              </div>
+              <h2 className="text-sm font-bold text-[var(--text-main)]">2. Tải lên hoặc chọn video nền & Logo</h2>
             </div>
-          ) : filteredVideos.length === 0 ? (
-            <EmptyState
-              icon={<FolderOpen size={24} />}
-              title={videoSearch ? 'Không tìm thấy video phù hợp' : 'Thư viện video đang trống'}
-              description={videoSearch ? 'Thử từ khóa khác hoặc làm mới thư viện.' : 'Nhấn “Tải video lên Supabase” để thêm video đầu tiên.'}
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="video/mp4,video/quicktime,video/x-m4v,video/webm,.mp4,.mov,.m4v,.webm"
+              onChange={handleVideoFile}
+              className="hidden"
             />
-          ) : (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {filteredVideos.map((video) => {
-                const key = getAssetKey(video);
-                const selected = key === selectedVideoKey;
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => selectVideo(video)}
-                    aria-pressed={selected}
-                    className={`flex min-w-0 items-center gap-3 rounded-2xl border p-4 text-left transition ${
-                      selected
-                        ? 'border-indigo-500/60 bg-indigo-500/10 shadow-lg shadow-indigo-950/10'
-                        : 'border-[var(--input-border)] bg-[var(--input-bg)] hover:border-indigo-500/30'
-                    }`}
-                  >
-                    <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${
-                      selected ? 'bg-indigo-600 text-white' : 'bg-[var(--active-menu-bg)] text-[var(--text-muted)]'
-                    }`}>
-                      {selected ? <CheckCircle2 size={20} /> : <Video size={20} />}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <h3 className="truncate text-xs font-bold text-[var(--text-main)]" title={getAssetName(video)}>{getAssetName(video)}</h3>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteVideo(video);
-                          }}
-                          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-rose-500/10 hover:text-rose-400"
-                          title={video.storageProvider === 'local' ? "Xóa video khỏi server" : "Xóa video khỏi Supabase"}
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                      <p className="mt-1 truncate text-[10px] text-[var(--text-muted)]">
-                        {formatBytes(video.size || video.fileSize || video.metadata?.size)}
-                      </p>
-                      <p className="mt-0.5 truncate text-[10px] text-[var(--text-muted)]">
-                        {formatDate(video.createdAt || video.created_at || video.updatedAt)}
-                      </p>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
 
-          {selectedVideo && (
-            <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.05] p-4">
-              <div className="mb-3 flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">Video đã chọn</span>
-                  <h3 className="mt-1 truncate text-sm font-bold text-[var(--text-main)]">{getAssetName(selectedVideo)}</h3>
+            <input
+              ref={watermarkInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/jpg,image/webp"
+              onChange={handleWatermarkFile}
+              className="hidden"
+            />
+
+            <div className="flex flex-col gap-3">
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+                  <input
+                    type="search"
+                    value={videoSearch}
+                    onChange={(event) => setVideoSearch(event.target.value)}
+                    placeholder="Tìm theo tên video..."
+                    className="w-full rounded-xl border border-[var(--input-border)] bg-[var(--input-bg)] py-2.5 pl-8 pr-3 text-xs text-[var(--text-main)] outline-none focus:border-indigo-500"
+                  />
                 </div>
-                <div className="flex items-center gap-2">
-                  {selectedVideo.storageProvider === 'local' ? (
-                    <>
-                      <button
-                        type="button"
-                        onClick={handlePersistVideo}
-                        disabled={persistingVideo}
-                        className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-indigo-500 disabled:opacity-50"
-                      >
-                        {persistingVideo ? (
-                          <Loader2 className="animate-spin" size={13} />
-                        ) : (
-                          <CloudUpload size={13} />
-                        )}
-                        Lưu Supabase
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteVideo(selectedVideo)}
-                        className="inline-flex items-center gap-1.5 rounded-xl border border-rose-500/25 bg-rose-500/10 px-3 py-1.5 text-xs font-bold text-rose-400 transition hover:bg-rose-500/15"
-                      >
-                        <Trash2 size={13} />
-                        Xóa Server
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteVideo(selectedVideo)}
-                      className="inline-flex items-center gap-1.5 rounded-xl border border-rose-500/25 bg-rose-500/10 px-3 py-1.5 text-xs font-bold text-rose-400 transition hover:bg-rose-500/15"
-                    >
-                      <Trash2 size={13} />
-                      Xóa Supabase
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => selectVideo(null)}
-                    disabled={persistingVideo}
-                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-rose-500/10 hover:text-rose-400"
-                    title="Bỏ chọn video"
-                  >
-                    <X size={16} />
-                  </button>
-                </div>
-              </div>
-              {getAssetUrl(selectedVideo) && (
-                <video
-                  key={selectedVideoKey}
-                  src={getAssetUrl(selectedVideo)}
-                  controls
-                  preload="metadata"
-                  className="max-h-96 w-full rounded-xl bg-black object-contain"
+                <button
+                  type="button"
+                  onClick={() => loadVideos()}
+                  disabled={videosLoading || uploadingVideo}
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[var(--active-menu-border)] bg-[var(--active-menu-bg)] text-[var(--text-main)] transition hover:brightness-110"
                 >
-                  Trình duyệt không hỗ trợ phát video.
-                </video>
-              )}
-            </div>
-          )}
-        </div>
-      </section>
-
-      <section className="glass-effect rounded-3xl border border-[var(--glass-border)] p-5 sm:p-7">
-        <StepHeader
-          number="4"
-          icon={<GitMerge size={20} />}
-          title="Ghép âm thanh vào video"
-          description="Âm thanh đang chọn sẽ thay thế âm thanh gốc của video. File kết quả được lưu vào thư viện media, ưu tiên Supabase, để xem và tải xuống."
-          complete={Boolean(mergedVideo)}
-          busy={merging}
-        />
-
-        <div className="mt-5 flex flex-col gap-5">
-          <div className="grid gap-3 lg:grid-cols-2">
-            <div className={`rounded-2xl border p-4 ${audioAsset ? 'border-violet-500/25 bg-violet-500/[0.06]' : 'border-[var(--input-border)] bg-[var(--input-bg)]'}`}>
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-500/10 text-violet-400"><Music size={19} /></div>
-                <div className="min-w-0">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">Âm thanh</span>
-                  <p className="mt-1 truncate text-xs font-bold text-[var(--text-main)]">{audioAsset ? getAssetName(audioAsset) : 'Chưa hoàn thành bước 1'}</p>
-                </div>
+                  <RefreshCw size={14} className={videosLoading ? 'animate-spin' : ''} />
+                </button>
               </div>
-            </div>
-            <div className={`rounded-2xl border p-4 ${selectedVideo ? 'border-sky-500/25 bg-sky-500/[0.06]' : 'border-[var(--input-border)] bg-[var(--input-bg)]'}`}>
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-500/10 text-sky-400"><Video size={19} /></div>
-                <div className="min-w-0">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">Video</span>
-                  <p className="mt-1 truncate text-xs font-bold text-[var(--text-main)]">{selectedVideo ? getAssetName(selectedVideo) : 'Chưa chọn video ở bước 3'}</p>
-                </div>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploadingVideo || videosLoading || merging}
+                  className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-indigo-500/40 bg-indigo-500/[0.03] py-2.5 text-xs font-bold text-indigo-400 hover:bg-indigo-500/10 transition"
+                >
+                  {uploadingVideo ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                  Tải video lên
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => watermarkInputRef.current?.click()}
+                  disabled={uploadingWatermark || merging}
+                  className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-violet-500/40 bg-violet-500/[0.03] py-2.5 text-xs font-bold text-violet-400 hover:bg-violet-500/10 transition"
+                >
+                  {uploadingWatermark ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                  Chèn Logo
+                </button>
               </div>
-            </div>
-          </div>
 
-          <button
-            type="button"
-            onClick={mergeMedia}
-            disabled={merging || !audioAsset || !selectedVideo}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 px-6 py-4 text-sm font-bold text-white shadow-xl shadow-indigo-950/20 transition hover:from-indigo-500 hover:to-violet-500 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {merging ? <Loader2 size={19} className="animate-spin" /> : <GitMerge size={19} />}
-            {merging ? 'Đang ghép và lưu video kết quả...' : 'Ghép âm thanh với video đã chọn'}
-          </button>
-
-          {(!audioAsset || !selectedVideo) && (
-            <p className="text-center text-[11px] text-[var(--text-muted)]">
-              {!audioAsset && !selectedVideo
-                ? 'Cần có âm thanh ở bước 1 và một video được chọn ở bước 3.'
-                : !audioAsset
-                  ? 'Hãy trích xuất âm thanh ở bước 1.'
-                  : 'Hãy chọn hoặc tải video lên ở bước 3.'}
-            </p>
-          )}
-          <WarningNotice message={mergeWarning} />
-          <ErrorNotice message={mergeError} />
-
-          {mergedVideo && (
-            <div className="overflow-hidden rounded-2xl border border-emerald-500/25 bg-emerald-500/[0.05]">
-              <div className="flex flex-col gap-3 border-b border-emerald-500/15 p-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0">
-                  <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-emerald-400">
-                    <CheckCircle2 size={13} /> Ghép thành công
-                  </span>
-                  <h3 className="mt-1 truncate text-sm font-bold text-[var(--text-main)]">{getAssetName(mergedVideo)}</h3>
-                </div>
-                {mergedVideoDownloadUrl && (
-                  <a
-                    href={mergedVideoDownloadUrl}
-                    download={getAssetName(mergedVideo)}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white transition hover:bg-emerald-500"
+              {/* Watermark preview */}
+              {watermarkAsset && (
+                <div className="flex items-center justify-between gap-2 p-2 rounded-xl bg-violet-500/[0.04] border border-violet-500/20">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <img src={getAssetUrl(watermarkAsset)} alt="Logo" className="h-7 w-7 rounded object-contain border border-[var(--border-main)] bg-[var(--input-bg)]" />
+                    <span className="text-[11px] truncate text-[var(--text-muted)]" title={getAssetName(watermarkAsset)}>
+                      Watermark: {getAssetName(watermarkAsset)}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setWatermarkAsset(null)}
+                    className="p-1 rounded text-[var(--text-muted)] hover:text-rose-400 transition"
                   >
-                    <Download size={15} /> Tải video kết quả
-                  </a>
+                    <X size={14} />
+                  </button>
+                </div>
+              )}
+
+              <ErrorNotice message={videoError} />
+              <ErrorNotice message={watermarkError} />
+              <WarningNotice message={videoWarning} />
+
+              {/* Video Library List - multi-select với badge */}
+              <div className="max-h-52 overflow-y-auto rounded-xl border border-[var(--input-border)] bg-[var(--input-bg)] p-2 flex flex-col gap-1">
+                {videosLoading ? (
+                  <div className="flex py-6 flex-col items-center justify-center gap-2 text-xs text-[var(--text-muted)]">
+                    <Loader2 size={18} className="animate-spin text-indigo-400" />
+                    Đang đồng bộ...
+                  </div>
+                ) : filteredVideos.length === 0 ? (
+                  <div className="text-center py-6 text-xs text-[var(--text-muted)]">Thư viện trống</div>
+                ) : (
+                  filteredVideos.map((video) => {
+                    const key = getAssetKey(video);
+                    const selIdx = selectedVideos.findIndex(v => getAssetKey(v) === key);
+                    const isSelected = selIdx >= 0;
+                    return (
+                      <div
+                        key={key}
+                        onClick={() => toggleVideoSelection(video)}
+                        className={`flex items-center justify-between gap-2 p-2 rounded-lg cursor-pointer transition select-none ${
+                          isSelected
+                            ? 'bg-indigo-500/10 border border-indigo-500/40'
+                            : 'hover:bg-[var(--active-menu-bg)] border border-transparent'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          {/* Badge số thứ tự */}
+                          {isSelected ? (
+                            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-indigo-500 text-[10px] font-bold text-white">
+                              {selIdx + 1}
+                            </span>
+                          ) : (
+                            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-[var(--input-border)] text-[var(--text-muted)]">
+                              <Video size={10} />
+                            </span>
+                          )}
+                          <span className="truncate text-xs text-[var(--text-main)]" title={getAssetName(video)}>
+                            {getAssetName(video)}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {video.duration > 0 && (
+                            <span className="text-[10px] text-[var(--text-muted)]">{formatTime(video.duration)}</span>
+                          )}
+                          <span className="text-[10px] text-[var(--text-muted)]">
+                            {formatBytes(video.size || video.fileSize || video.metadata?.size)}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteVideo(video);
+                            }}
+                            className="p-1 rounded text-[var(--text-muted)] hover:text-rose-400 transition"
+                            title="Xóa video"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
                 )}
               </div>
-              {mergedVideoUrl ? (
-                <div className="p-4">
-                  <video
-                    key={mergedVideoUrl}
-                    src={mergedVideoUrl}
-                    controls
-                    preload="metadata"
-                    className="max-h-[560px] w-full rounded-xl bg-black object-contain"
-                  >
-                    Trình duyệt không hỗ trợ phát video.
-                  </video>
+
+              {/* Selected Videos Panel - danh sách đã chọn + reorder */}
+              {selectedVideos.length > 0 && (
+                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.03] p-3 flex flex-col gap-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">
+                      Danh sách video ghép ({selectedVideos.length})
+                    </span>
+                    <div className="flex items-center gap-2">
+                      {/* Tổng thời lượng so với âm thanh */}
+                      {audioDuration > 0 && (
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                          selectedVideosTotalDuration >= audioDuration
+                            ? 'bg-emerald-500/15 text-emerald-400'
+                            : 'bg-amber-500/15 text-amber-400'
+                        }`}>
+                          Video: {formatTime(selectedVideosTotalDuration)} / Âm thanh: {formatTime(audioDuration)}
+                          {selectedVideosTotalDuration < audioDuration && ' (sẽ lặp lại)'}
+                        </span>
+                      )}
+                      {selectedVideos.some(v => v.storageProvider === 'local') && (
+                        <button
+                          type="button"
+                          onClick={handlePersistVideo}
+                          disabled={persistingVideo}
+                          className="inline-flex items-center gap-1 bg-indigo-600/10 text-indigo-400 hover:bg-indigo-600/20 px-2 py-1 rounded text-[10px] font-bold transition"
+                        >
+                          {persistingVideo ? <Loader2 className="animate-spin" size={10} /> : <CloudUpload size={10} />}
+                          Lưu Supabase
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Danh sách thứ tự */}
+                  <div className="flex flex-col gap-1">
+                    {selectedVideos.map((video, index) => (
+                      <div
+                        key={`selected-${getAssetKey(video)}-${index}`}
+                        className="flex items-center gap-2 p-1.5 rounded-lg bg-[var(--input-bg)] border border-[var(--input-border)]"
+                      >
+                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-indigo-500 text-[10px] font-bold text-white">
+                          {index + 1}
+                        </span>
+                        <span className="truncate text-xs text-[var(--text-main)] flex-1" title={getAssetName(video)}>
+                          {getAssetName(video)}
+                        </span>
+                        {video.duration > 0 && (
+                          <span className="text-[10px] text-[var(--text-muted)] shrink-0">{formatTime(video.duration)}</span>
+                        )}
+                        {/* Nút lên / xuống */}
+                        <div className="flex gap-0.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => moveSelectedVideo(index, -1)}
+                            disabled={index === 0 || merging}
+                            className="p-0.5 rounded text-[var(--text-muted)] hover:text-indigo-400 disabled:opacity-30 transition"
+                            title="Lên"
+                          >
+                            <ChevronUp size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => moveSelectedVideo(index, 1)}
+                            disabled={index === selectedVideos.length - 1 || merging}
+                            className="p-0.5 rounded text-[var(--text-muted)] hover:text-indigo-400 disabled:opacity-30 transition"
+                            title="Xuống"
+                          >
+                            <ChevronDown size={13} />
+                          </button>
+                        </div>
+                        {/* Xóa khỏi danh sách */}
+                        <button
+                          type="button"
+                          onClick={() => removeFromSelected(index)}
+                          disabled={merging}
+                          className="p-0.5 rounded text-[var(--text-muted)] hover:text-rose-400 transition shrink-0"
+                          title="Bỏ chọn"
+                        >
+                          <X size={13} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Preview video đầu tiên */}
+                  {getAssetUrl(selectedVideos[0]) && (
+                    <video
+                      key={getAssetKey(selectedVideos[0])}
+                      src={getAssetUrl(selectedVideos[0])}
+                      controls
+                      className="max-h-36 w-full rounded bg-black object-contain mt-1"
+                    />
+                  )}
                 </div>
-              ) : (
-                <div className="p-4 text-xs text-amber-400">Backend chưa trả về public URL cho video kết quả.</div>
               )}
             </div>
-          )}
+          </div>
+
+          {/* STEP 3: MERGING PROCESS & RESULTS */}
+          <div className="glass-effect flex flex-col gap-4 rounded-3xl border border-[var(--glass-border)] p-5 sm:p-7">
+            <div className="flex items-center gap-2 border-b border-[var(--border-main)] pb-3">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-500/10 text-indigo-400">
+                <GitMerge size={16} />
+              </div>
+              <h2 className="text-sm font-bold text-[var(--text-main)]">3. Kết quả ghép video</h2>
+            </div>
+
+            <div className="flex flex-col gap-4">
+              <button
+                type="button"
+                onClick={mergeMedia}
+                disabled={merging || !audioAsset || selectedVideos.length === 0}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-indigo-600 to-violet-600 px-6 py-4 text-sm font-bold text-white shadow-xl shadow-indigo-950/20 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {merging ? <Loader2 size={18} className="animate-spin" /> : <GitMerge size={18} />}
+                {merging
+                  ? 'Đang ghép và tạo video mới...'
+                  : selectedVideos.length > 1
+                    ? `Ghép ${selectedVideos.length} video + âm thanh`
+                    : 'Ghép âm thanh vào video đã chọn'
+                }
+              </button>
+
+              <ErrorNotice message={mergeError} />
+              <WarningNotice message={mergeWarning} />
+
+              {/* Merged Video Result Display */}
+              {mergedVideo ? (
+                <div className="overflow-hidden rounded-2xl border border-emerald-500/25 bg-emerald-500/[0.03] mt-2">
+                  <div className="flex flex-col gap-3 border-b border-emerald-500/15 p-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-emerald-400">
+                        <CheckCircle2 size={12} /> Ghép thành công
+                        {selectedVideos.length > 1 && ` (${selectedVideos.length} video)`}
+                      </span>
+                      <h3 className="mt-1 truncate text-xs font-bold text-[var(--text-main)]" title={getAssetName(mergedVideo)}>
+                        {getAssetName(mergedVideo)}
+                      </h3>
+                    </div>
+                    {mergedVideoDownloadUrl && (
+                      <a
+                        href={mergedVideoDownloadUrl}
+                        download={getAssetName(mergedVideo)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-bold text-white transition hover:bg-emerald-500"
+                      >
+                        <Download size={14} /> Tải xuống
+                      </a>
+                    )}
+                  </div>
+                  {mergedVideoUrl ? (
+                    <div className="p-4 bg-black">
+                      <video
+                        key={mergedVideoUrl}
+                        src={mergedVideoUrl}
+                        controls
+                        className="max-h-96 w-full object-contain"
+                      />
+                    </div>
+                  ) : (
+                    <div className="p-4 text-xs text-amber-400">Không tìm thấy public URL để xem trước video.</div>
+                  )}
+                </div>
+              ) : (
+                <EmptyState
+                  icon={<Video size={24} />}
+                  title="Chưa có video kết quả"
+                  description="Hãy chuẩn bị đủ âm thanh ở phần 1, chọn một hoặc nhiều video ở phần 2. Hệ thống sẽ tự động ghép, nếu video ngắn hơn âm thanh sẽ tự động lặp lại."
+                />
+              )}
+            </div>
+          </div>
         </div>
-      </section>
+      </div>
     </div>
   );
 }
