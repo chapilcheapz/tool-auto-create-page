@@ -55,9 +55,11 @@ async function createNewPage(req, res) {
       const bio = (Array.isArray(pageBios) ? pageBios[i] : pageBios) || customBio || '';
       
       try {
+        console.log(`[CreatePage] 🚀 Đang khởi chạy tạo trang #${i + 1}/${namesList.length} (Tên: '${name || 'Ngẫu nhiên'}')...`);
         const result = await facebookService.createPage(cookie, name, bio, category);
         const time = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         
+        console.log(`[CreatePage] ✅ Tạo trang THÀNH CÔNG: Tên='${result.name}', Bio='${result.bio}'`);
         campaignManager.addLog(campaignId, {
           success: result.success,
           pageName: result.name || name || 'Tên ngẫu nhiên',
@@ -67,6 +69,7 @@ async function createNewPage(req, res) {
           time
         });
       } catch (error) {
+        console.error(`[CreatePage] ❌ Tạo trang THẤT BẠI #${i + 1}: Tên='${name || 'Ngẫu nhiên'}', Lỗi: ${error.message}`);
         const time = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         campaignManager.addLog(campaignId, {
           success: false,
