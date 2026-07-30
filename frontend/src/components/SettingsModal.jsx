@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, RefreshCw, ShieldCheck, Loader2, Plus, Trash2, Upload, Video, CheckCircle, AlertTriangle } from 'lucide-react';
+import { X, RefreshCw, ShieldCheck, Loader2, Plus, Trash2, Upload, Video, CheckCircle, AlertTriangle, KeyRound, UserCheck, Lock } from 'lucide-react';
 import * as api from '../utils/api';
 
 export default function SettingsModal({ isOpen, onClose, showToast, onCookieChange, initialCookie }) {
@@ -367,8 +367,8 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
     }
   };
 
-  const activeTabClass = 'pb-2 px-3 text-xs font-semibold text-[var(--text-main)] border-b-2 border-blue-500 bg-transparent cursor-pointer text-center outline-none transition-all duration-200 border-x-0 border-t-0 shrink-0';
-  const inactiveTabClass = 'pb-2 px-3 text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text-main)] bg-transparent border-b-2 border-transparent cursor-pointer text-center outline-none transition-all duration-200 border-x-0 border-t-0 shrink-0';
+  const activeTabClass = 'flex items-center gap-3 px-3.5 py-3 rounded-xl text-xs font-bold bg-[var(--active-menu-bg)] text-[var(--active-menu-text)] border border-[var(--active-menu-border)] shadow-sm transition-all cursor-pointer text-left w-full outline-none shrink-0';
+  const inactiveTabClass = 'flex items-center gap-3 px-3.5 py-3 rounded-xl text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--text-main)]/5 border border-transparent bg-transparent transition-all cursor-pointer text-left w-full outline-none shrink-0';
 
   return (
     <>
@@ -452,17 +452,16 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
       )}
 
       {/* Modal cài đặt chính */}
-    <div className="fixed inset-0 z-[100] flex items-center justify-center">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
       {/* Overlay */}
       <div 
         onClick={onClose}
         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
       ></div>
 
-      {/* Content */}
-      <div className="relative z-10 w-full max-w-[500px] bg-[var(--bg-sidebar)] border border-[var(--border-main)] rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+      {/* Content Container */}
+      <div className="relative z-10 w-full max-w-[750px] bg-[var(--bg-sidebar)] border border-[var(--border-main)] rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col">
         {/* Header */}
-
         <div className="flex justify-between items-center p-4 border-b border-[var(--border-main)] bg-white/2">
           <h2 className="text-sm font-bold text-[var(--text-main)] uppercase tracking-wider">Cấu hình hệ thống</h2>
           <button 
@@ -473,35 +472,46 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
           </button>
         </div>
 
-        {/* Body */}
-        <div className="p-5 flex flex-col">
-          {/* Tabs */}
-          <div className="flex items-center gap-2 border-b border-[var(--border-main)] mb-4 overflow-x-auto pb-0.5 scrollbar-none">
+        {/* Body - Flex Row cho Sidebar Tabs bên trái & Panel Content bên phải */}
+        <div className="flex flex-row min-h-[400px] overflow-hidden">
+          {/* Cột Tabs Sidebar bên trái */}
+          <div className="w-52 border-r border-[var(--border-main)] p-3 flex flex-col gap-1.5 shrink-0 bg-white/1">
             <button 
+              type="button"
               onClick={() => setActiveTab('cookie')}
               className={activeTab === 'cookie' ? activeTabClass : inactiveTabClass}
             >
-              Dán Cookie thủ công
+              <KeyRound size={16} />
+              <span>Dán Cookie thủ công</span>
             </button>
             <button 
+              type="button"
               onClick={() => setActiveTab('login')}
               className={activeTab === 'login' ? activeTabClass : inactiveTabClass}
             >
-              Đăng nhập tài khoản
+              <UserCheck size={16} />
+              <span>Đăng nhập tài khoản</span>
             </button>
             <button 
+              type="button"
               onClick={() => setActiveTab('yttiktok')}
               className={activeTab === 'yttiktok' ? activeTabClass : inactiveTabClass}
             >
-              YT &amp; TikTok
+              <Video size={16} />
+              <span>YT &amp; TikTok</span>
             </button>
             <button 
+              type="button"
               onClick={() => setActiveTab('password')}
               className={activeTab === 'password' ? activeTabClass : inactiveTabClass}
             >
-              Đổi mật khẩu
+              <Lock size={16} />
+              <span>Đổi mật khẩu</span>
             </button>
           </div>
+
+          {/* Cột Nội dung bên phải */}
+          <div className="flex-1 p-5 overflow-y-auto max-h-[500px]">
 
           {/* Panel 1: Paste Cookie */}
           {activeTab === 'cookie' && (
@@ -866,6 +876,8 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
               </div>
             </form>
           )}
+          {/* Kết thúc Cột Nội dung bên phải */}
+          </div>
         </div>
       </div>
     </div>
