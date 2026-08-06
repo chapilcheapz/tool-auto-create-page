@@ -128,9 +128,12 @@ async function parseYouTubeVideo(url) {
   const javascriptRuntimeArgs = ytdlpService.buildJavaScriptRuntimeArgs(cleanUrl);
   const iosUA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1';
 
+  const proxyArgs = process.env.YTDLP_PROXY ? ['--proxy', process.env.YTDLP_PROXY] : [];
+
   return new Promise((resolve) => {
     const titleArgs = [
       '--ignore-config',
+      ...proxyArgs,
       ...javascriptRuntimeArgs,
       '--no-playlist', '--no-warnings', '--skip-download',
       '--extractor-args', 'youtube:player_client=ios,android,mweb',
@@ -141,6 +144,7 @@ async function parseYouTubeVideo(url) {
 
     const urlArgs = [
       '--ignore-config',
+      ...proxyArgs,
       ...javascriptRuntimeArgs,
       '--no-playlist', '--no-warnings',
       '--extractor-args', 'youtube:player_client=ios,android,mweb',

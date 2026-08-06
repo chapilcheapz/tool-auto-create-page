@@ -380,9 +380,12 @@ function downloadWithYtDlp(sourceUrl, outputTemplate, onProgress) {
         )
       : [];
 
+    const proxyArgs = process.env.YTDLP_PROXY ? ['--proxy', process.env.YTDLP_PROXY] : [];
+
     const args = [
       '--ignore-config',
       ...cookieArgs,
+      ...proxyArgs,
       ...extraBypassArgs,
       ...javascriptRuntimeArgs,
       '--no-playlist',
@@ -508,9 +511,12 @@ function downloadAudioWithYtDlp(sourceUrl, outputTemplate, onProgress, options =
       ? configuredMaxSize
       : '250M';
 
+    const proxyArgs = process.env.YTDLP_PROXY ? ['--proxy', process.env.YTDLP_PROXY] : [];
+
     const args = [
       '--ignore-config',
       ...cookieArgs,
+      ...proxyArgs,
       ...extraBypassArgs,
       ...javascriptRuntimeArgs,
       '--no-playlist',
