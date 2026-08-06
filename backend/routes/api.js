@@ -61,6 +61,7 @@ router.post('/media/watermark/upload', mediaController.uploadWatermark);
 router.post('/media/merge', mediaController.mergeMedia);
 router.post('/media/persist-remote', mediaController.persistRemoteMedia);
 router.post('/media/delete', mediaController.deleteMedia);
+router.post('/media/local-save', mediaController.saveToLocalComputer);
 
 // Change password
 router.post('/auth/change-password', authController.changePassword);

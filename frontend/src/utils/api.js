@@ -177,11 +177,11 @@ export async function reactPost(body) {
 /**
  * Media studio APIs
  */
-export async function extractAudio(url, signal) {
+export async function extractAudio(url, type = 'audio', signal) {
   const response = await authFetch('/api/media/audio/extract', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url }),
+    body: JSON.stringify({ url, type }),
     signal
   });
   return safeJsonResponse(response);
@@ -283,6 +283,7 @@ export async function deleteMedia(body) {
   return safeJsonResponse(response);
 }
 
+
 export async function googleLogin(email, password, proxy = '') {
   const response = await authFetch('/api/config/google-login', {
     method: 'POST',
@@ -296,3 +297,13 @@ export async function getGoogleStatus() {
   const response = await authFetch('/api/config/google-status');
   return safeJsonResponse(response);
 }
+
+export async function saveToLocalComputer(localFileName) {
+  const response = await authFetch('/api/media/local-save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ localFileName })
+  });
+  return safeJsonResponse(response);
+}
+
