@@ -35,6 +35,10 @@ router.get('/config/fb-verification-status', configController.getVerificationSta
 router.post('/config/fb-verification-submit', configController.submitVerificationCode);
 router.post('/config/fb-verification-click', configController.handleVerificationClick);
 
+// Google Auth routes
+router.post('/config/google-login', configController.googleLogin);
+router.get('/config/google-status', configController.getGoogleStatus);
+
 
 // Page routes
 router.post('/get-pages', pageController.fetchPages);

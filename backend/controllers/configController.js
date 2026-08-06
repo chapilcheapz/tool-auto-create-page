@@ -9,6 +9,10 @@ const {
   diagnoseCookiesService
 } = require('../services/facebookAuthService');
 const {
+  googleLoginService,
+  getGoogleStatusService
+} = require('../services/googleAuthService');
+const {
   getCookiesStatus,
   writeCookiesToTempFile,
   writePlatformCookiesToFile,
@@ -294,6 +298,28 @@ async function getPlatformCookieContent(req, res) {
   }
 }
 
+async function googleLogin(req, res) {
+  const { email, password, proxy } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ success: false, error: 'Vui lòng cung cấp Email và Mật khẩu Google!' });
+  }
+  try {
+    const result = await googleLoginService(email, password, proxy);
+    return res.json(result);
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+}
+
+async function getGoogleStatus(req, res) {
+  try {
+    const result = await getGoogleStatusService();
+    return res.json(result);
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+}
+
 module.exports = {
   getConfig,
   saveConfig,
@@ -308,5 +334,7 @@ module.exports = {
   uploadYtdlpCookies,
   uploadPlatformCookies,
   getPlatformCookieStatus,
-  getPlatformCookieContent
+  getPlatformCookieContent,
+  googleLogin,
+  getGoogleStatus
 };
