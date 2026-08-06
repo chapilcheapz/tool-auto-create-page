@@ -159,6 +159,7 @@ export default function VideoDownloadView({ showToast }) {
   const [audioAsset, setAudioAsset] = useState(null);
   const [originalAudioAsset, setOriginalAudioAsset] = useState(null);
   const [extracting, setExtracting] = useState(false);
+  const [extractType, setExtractType] = useState('audio'); // 'audio', 'video_silent', 'video_full'
   const [extractError, setExtractError] = useState('');
   const [extractWarning, setExtractWarning] = useState('');
 
@@ -192,6 +193,8 @@ export default function VideoDownloadView({ showToast }) {
   const [mergeError, setMergeError] = useState('');
   const [mergeWarning, setMergeWarning] = useState('');
   const [mergedVideo, setMergedVideo] = useState(null);
+  const [downloadingVideo, setDownloadingVideo] = useState(false);
+  const [persistingMergedVideo, setPersistingMergedVideo] = useState(false);
 
   const [persistingAudio, setPersistingAudio] = useState(false);
   const [persistingVideo, setPersistingVideo] = useState(false);
@@ -276,6 +279,29 @@ export default function VideoDownloadView({ showToast }) {
     setEditError('');
   }, [audioAsset]);
 
+  // Lưu video về máy trực tiếp (không qua trình tải của Chrome nếu ở local)
+  const handleDownloadMergedVideo = useCallback(async () => {
+    if (!mergedVideo || downloadingVideo) return;
+    const fileName = getAssetName(mergedVideo) || 'video.mp4';
+
+    // Nếu video đang ở local server, tải trực tiếp qua trình duyệt của người dùng
+    if (mergedVideo?.storageProvider === 'local' && mergedVideo?.localFileName) {
+      const localUrl = `/api/media/local/${encodeURIComponent(mergedVideo.localFileName)}`;
+      window.location.href = localUrl.includes('?') ? `${localUrl}&dl=1` : `${localUrl}?dl=1`;
+      showToast?.(`Đang tải video về máy: ${fileName}`, 'success');
+      return;
+    }
+
+    // Fallback: Nếu đã lưu Supabase, mở trong tab mới để xem/tải
+    const remoteUrl = getAssetDownloadUrl(mergedVideo);
+    if (!remoteUrl) {
+      showToast?.('Không tìm thấy URL video.', 'error');
+      return;
+    }
+    window.open(remoteUrl, '_blank');
+    showToast?.(`Đang mở video: ${fileName}`, 'success');
+  }, [mergedVideo, downloadingVideo, showToast]);
+
   useEffect(() => () => {
     extractAbortRef.current?.abort();
   }, []);
@@ -358,21 +384,61 @@ export default function VideoDownloadView({ showToast }) {
     setMergedVideo(null);
 
     try {
-      const result = await api.extractAudio(targetUrl, controller.signal);
+      const result = await api.extractAudio(targetUrl, extractType, controller.signal);
       if (requestId !== extractSequenceRef.current) return;
-      if (!result?.success || !result.audio) {
-        throw new Error(result?.error || 'Máy chủ không trả về file âm thanh hợp lệ.');
-      }
 
-      setAudioAsset(result.audio);
-      setOriginalAudioAsset(result.audio);
-      setExtractWarning(result.warning || '');
-      if (showToast) showToast('Đã trích xuất âm thanh thành công!', 'success');
+      if (extractType === 'audio') {
+        if (!result?.success || !result.audio) {
+          throw new Error(result?.error || 'Máy chủ không trả về file âm thanh hợp lệ.');
+        }
 
-      // Chỉ lấy âm thanh. Nếu đã có video trong danh sách thì tự động ghép.
-      const existingVideos = selectedVideosRef.current;
-      if (existingVideos && existingVideos.length > 0) {
-        triggerAutoMerge(result.audio, existingVideos, watermarkAssetRef.current);
+        setAudioAsset(result.audio);
+        setOriginalAudioAsset(result.audio);
+        setExtractWarning(result.warning || '');
+
+        // Kích hoạt tải về máy trực tiếp qua trình duyệt của người dùng
+        if (result.audio.localFileName) {
+          const localUrl = `/api/media/local/${encodeURIComponent(result.audio.localFileName)}`;
+          window.location.href = `${localUrl}?dl=1`;
+        }
+
+        if (showToast) showToast('Đã trích xuất và tải âm thanh về máy thành công!', 'success');
+
+        // Chỉ lấy âm thanh. Nếu đã có video trong danh sách thì tự động ghép.
+        const existingVideos = selectedVideosRef.current;
+        if (existingVideos && existingVideos.length > 0) {
+          triggerAutoMerge(result.audio, existingVideos, watermarkAssetRef.current);
+        }
+      } else {
+        if (!result?.success || !result.video) {
+          throw new Error(result?.error || 'Máy chủ không trả về file video hợp lệ.');
+        }
+
+        // Thêm vào danh sách video thư viện
+        setVideos(current => [
+          result.video,
+          ...current.filter(v => getAssetKey(v) !== getAssetKey(result.video))
+        ]);
+        // Tự động chọn video mới trích xuất
+        setSelectedVideos(current => {
+          if (current.some(v => getAssetKey(v) === getAssetKey(result.video))) return current;
+          return [...current, result.video];
+        });
+
+        // Nếu tải cả hai, tự động chuyển vào kết quả bước 3
+        if (extractType === 'video_full') {
+          setMergedVideo(result.video);
+        }
+
+        // Kích hoạt tải về máy trực tiếp qua trình duyệt của người dùng
+        if (result.video.localFileName) {
+          const localUrl = `/api/media/local/${encodeURIComponent(result.video.localFileName)}`;
+          window.location.href = `${localUrl}?dl=1`;
+        }
+
+        setExtractWarning(result.warning || '');
+        const modeText = extractType === 'video_silent' ? 'video câm' : 'toàn bộ video';
+        if (showToast) showToast(`Đã tải thành công ${modeText} về máy!`, 'success');
       }
 
     } catch (error) {
@@ -758,6 +824,29 @@ export default function VideoDownloadView({ showToast }) {
     }
   };
 
+  // Lưu merged video (đang ở local) lên Supabase
+  const handlePersistMergedVideo = async () => {
+    if (!mergedVideo || mergedVideo.storageProvider !== 'local' || !mergedVideo.localFileName) return;
+    setPersistingMergedVideo(true);
+    try {
+      const result = await api.persistRemoteMedia(mergedVideo.localFileName, 'video');
+      if (result?.success && result.asset) {
+        setMergedVideo(result.asset);
+        setVideos(current => [
+          result.asset,
+          ...current.filter(v => getAssetKey(v) !== getAssetKey(mergedVideo))
+        ]);
+        if (showToast) showToast('Đã lưu video lên Supabase thành công!', 'success');
+      } else {
+        throw new Error(result?.error || 'Không thể lưu lên Supabase');
+      }
+    } catch (err) {
+      if (showToast) showToast(err.message || 'Lỗi khi lưu lên Supabase.', 'error');
+    } finally {
+      setPersistingMergedVideo(false);
+    }
+  };
+
   // Xóa video khỏi thư viện
   const handleDeleteVideo = async (video) => {
     const key = getAssetKey(video);
@@ -842,6 +931,51 @@ export default function VideoDownloadView({ showToast }) {
                     <X size={16} />
                   </button>
                 )}
+              </div>
+
+              {/* LOẠI TRÍCH XUẤT SELECTION PILLS */}
+              <div className="flex flex-col gap-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                  Loại trích xuất
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setExtractType('audio')}
+                    disabled={extracting}
+                    className={`flex-1 rounded-xl py-2.5 text-xs font-bold transition border ${
+                      extractType === 'audio'
+                        ? 'bg-violet-600/10 text-violet-400 border-violet-500/30'
+                        : 'bg-[var(--input-bg)] text-[var(--text-muted)] border-[var(--input-border)] hover:text-[var(--text-main)]'
+                    }`}
+                  >
+                    Âm thanh
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setExtractType('video_silent')}
+                    disabled={extracting}
+                    className={`flex-1 rounded-xl py-2.5 text-xs font-bold transition border ${
+                      extractType === 'video_silent'
+                        ? 'bg-violet-600/10 text-violet-400 border-violet-500/30'
+                        : 'bg-[var(--input-bg)] text-[var(--text-muted)] border-[var(--input-border)] hover:text-[var(--text-main)]'
+                    }`}
+                  >
+                    Video silent
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setExtractType('video_full')}
+                    disabled={extracting}
+                    className={`flex-1 rounded-xl py-2.5 text-xs font-bold transition border ${
+                      extractType === 'video_full'
+                        ? 'bg-violet-600/10 text-violet-400 border-violet-500/30'
+                        : 'bg-[var(--input-bg)] text-[var(--text-muted)] border-[var(--input-border)] hover:text-[var(--text-main)]'
+                    }`}
+                  >
+                    Cả hai
+                  </button>
+                </div>
               </div>
 
               <div className="flex gap-2">
@@ -1338,24 +1472,42 @@ export default function VideoDownloadView({ showToast }) {
                   <div className="flex flex-col gap-3 border-b border-emerald-500/15 p-4 sm:flex-row sm:items-center sm:justify-between">
                     <div className="min-w-0">
                       <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-emerald-400">
-                        <CheckCircle2 size={12} /> Ghép thành công
-                        {selectedVideos.length > 1 && ` (${selectedVideos.length} video)`}
+                        <CheckCircle2 size={12} /> {getAssetName(mergedVideo)?.includes('_full') ? 'Tải thành công' : 'Ghép thành công'}
+                        {!getAssetName(mergedVideo)?.includes('_full') && selectedVideos.length > 1 && ` (${selectedVideos.length} video)`}
                       </span>
                       <h3 className="mt-1 truncate text-xs font-bold text-[var(--text-main)]" title={getAssetName(mergedVideo)}>
                         {getAssetName(mergedVideo)}
                       </h3>
                     </div>
-                    {mergedVideoDownloadUrl && (
-                      <a
-                        href={mergedVideoDownloadUrl}
-                        download={getAssetName(mergedVideo)}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-bold text-white transition hover:bg-emerald-500"
-                      >
-                        <Download size={14} /> Tải xuống
-                      </a>
-                    )}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {/* Lưu Supabase - chỉ hiện khi file đang ở local */}
+                      {mergedVideo?.storageProvider === 'local' && mergedVideo?.localFileName && (
+                        <button
+                          type="button"
+                          onClick={handlePersistMergedVideo}
+                          disabled={persistingMergedVideo || downloadingVideo}
+                          className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-indigo-600/15 px-3.5 py-2 text-xs font-bold text-indigo-400 hover:bg-indigo-600/25 transition disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          {persistingMergedVideo
+                            ? <><Loader2 size={14} className="animate-spin" /> Đang lưu...</>
+                            : <><CloudUpload size={14} /> Lưu Supabase</>
+                          }
+                        </button>
+                      )}
+                      {mergedVideoDownloadUrl && (
+                        <button
+                          type="button"
+                          onClick={handleDownloadMergedVideo}
+                          disabled={downloadingVideo}
+                          className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-bold text-white transition hover:bg-emerald-500 disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          {downloadingVideo
+                            ? <><Loader2 size={14} className="animate-spin" /> Đang sao chép...</>
+                            : <><Download size={14} /> Tải về máy</>
+                          }
+                        </button>
+                      )}
+                    </div>
                   </div>
                   {mergedVideoUrl ? (
                     <div className="p-4 bg-black">

@@ -374,6 +374,26 @@ async function extractVideoNoAudioFromUrl(sourceUrl, workspace, onProgress, sign
   return { filePath: outputPath, probe, sourceUrl: safeUrl };
 }
 
+async function extractFullVideoFromUrl(sourceUrl, workspace, onProgress, signal) {
+  throwIfAborted(signal);
+  const safeUrl = await validateResolvedSourceUrl(sourceUrl);
+  throwIfAborted(signal);
+
+  const outputPath = path.join(workspace, 'source_full_video.mp4');
+  await ytdlpService.downloadWithYtDlp(
+    safeUrl,
+    outputPath,
+    onProgress
+  );
+  throwIfAborted(signal);
+
+  const probe = await probeMedia(outputPath, signal);
+  if (!probe.hasVideo) {
+    throw new MediaStudioError('Nguồn không chứa luồng hình ảnh (video)', 422, 'VIDEO_STREAM_MISSING');
+  }
+  return { filePath: outputPath, probe, sourceUrl: safeUrl };
+}
+
 function formatTimestamp(value) {
   return Number(value).toFixed(6).replace(/0+$/, '').replace(/\.$/, '') || '0';
 }
@@ -1042,6 +1062,7 @@ module.exports = {
   extensionForVideoUpload,
   extractAudioFromUrl,
   extractVideoNoAudioFromUrl,
+  extractFullVideoFromUrl,
   getMaxUploadBytes,
   getOwnerFolder,
   inferContentType,
