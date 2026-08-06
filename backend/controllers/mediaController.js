@@ -161,17 +161,29 @@ async function extractAudio(req, res) {
   let releaseSlot = () => {};
   const abortContext = createRequestAbortContext(req, res);
   const type = req.body?.type || 'audio'; // 'audio', 'video_silent', 'video_full'
+  const downloadId = req.body?.downloadId;
   try {
     releaseSlot = acquireProcessingSlot();
     const sourceUrl = req.body?.url || req.body?.sourceUrl;
     const owner = ownerFromRequest(req);
     workspace = await mediaStudioService.createWorkspace();
 
+    const onProgress = downloadId ? (line) => {
+      const match = line.match(/\[download\]\s+([0-9.]+)(?:%|\s+percent)/i);
+      if (match) {
+        const percent = parseFloat(match[1]);
+        if (!isNaN(percent)) {
+          global.downloadProgressMap = global.downloadProgressMap || new Map();
+          global.downloadProgressMap.set(downloadId, percent);
+        }
+      }
+    } : undefined;
+
     if (type === 'audio') {
       const extracted = await mediaStudioService.extractAudioFromUrl(
         sourceUrl,
         workspace,
-        undefined,
+        onProgress,
         abortContext.signal
       );
       mediaStudioService.throwIfAborted(abortContext.signal);
@@ -200,7 +212,7 @@ async function extractAudio(req, res) {
       const extracted = await mediaStudioService.extractVideoNoAudioFromUrl(
         sourceUrl,
         workspace,
-        undefined,
+        onProgress,
         abortContext.signal
       );
       mediaStudioService.throwIfAborted(abortContext.signal);
@@ -229,7 +241,7 @@ async function extractAudio(req, res) {
       const extracted = await mediaStudioService.extractFullVideoFromUrl(
         sourceUrl,
         workspace,
-        undefined,
+        onProgress,
         abortContext.signal
       );
       mediaStudioService.throwIfAborted(abortContext.signal);
@@ -261,6 +273,9 @@ async function extractAudio(req, res) {
     const actionLabel = type === 'audio' ? 'Tách âm thanh' : type === 'video_silent' ? 'Tách video câm' : 'Tải video';
     return sendError(res, error, `${actionLabel} thất bại`);
   } finally {
+    if (downloadId && global.downloadProgressMap) {
+      global.downloadProgressMap.delete(downloadId);
+    }
     await mediaStudioService.cleanupWorkspace(workspace);
     abortContext.dispose();
     releaseSlot();
@@ -881,8 +896,16 @@ async function removeAudioSegments(req, res) {
   }
 }
 
+async function getDownloadProgress(req, res) {
+  const { downloadId } = req.params;
+  global.downloadProgressMap = global.downloadProgressMap || new Map();
+  const progress = global.downloadProgressMap.get(downloadId) ?? null;
+  return res.json({ success: true, progress });
+}
+
 module.exports = {
   extractAudio,
+  getDownloadProgress,
   removeAudioSegment,
   removeAudioSegments,
   transcribeAudio,

@@ -46,6 +46,7 @@ router.post('/react-post', reactController.bulkReact);
 
 // Media studio routes (all processing and library mutations require login)
 router.post('/media/audio/extract', mediaController.extractAudio);
+router.get('/media/progress/:downloadId', mediaController.getDownloadProgress);
 router.post('/media/audio/transcribe', mediaController.transcribeAudio);
 router.post('/media/audio/remove-segment', mediaController.removeAudioSegment);
 router.post('/media/audio/remove-segments', mediaController.removeAudioSegments);

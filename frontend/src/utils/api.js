@@ -177,13 +177,18 @@ export async function reactPost(body) {
 /**
  * Media studio APIs
  */
-export async function extractAudio(url, type = 'audio', signal) {
+export async function extractAudio(url, type = 'audio', downloadId, signal) {
   const response = await authFetch('/api/media/audio/extract', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url, type }),
+    body: JSON.stringify({ url, type, downloadId }),
     signal
   });
+  return safeJsonResponse(response);
+}
+
+export async function getDownloadProgress(downloadId) {
+  const response = await authFetch(`/api/media/progress/${encodeURIComponent(downloadId)}`);
   return safeJsonResponse(response);
 }
 

@@ -159,6 +159,10 @@ export default function VideoDownloadView({ showToast }) {
   const [audioAsset, setAudioAsset] = useState(null);
   const [originalAudioAsset, setOriginalAudioAsset] = useState(null);
   const [extracting, setExtracting] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(null);
+  const [fileDownloading, setFileDownloading] = useState(false);
+  const [fileDownloadProgress, setFileDownloadProgress] = useState(0);
+  const [fileDownloadName, setFileDownloadName] = useState('');
   const [extractType, setExtractType] = useState('audio'); // 'audio', 'video_silent', 'video_full'
   const [extractError, setExtractError] = useState('');
   const [extractWarning, setExtractWarning] = useState('');
@@ -279,6 +283,53 @@ export default function VideoDownloadView({ showToast }) {
     setEditError('');
   }, [audioAsset]);
 
+  // Tải tệp trực tiếp về trình duyệt và cập nhật thanh tiến độ
+  const downloadFileWithProgress = useCallback(async (url, fileName) => {
+    try {
+      setFileDownloading(true);
+      setFileDownloadProgress(0);
+      setFileDownloadName(fileName);
+
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+      const reader = response.body.getReader();
+      const contentLength = +response.headers.get('Content-Length');
+
+      let receivedLength = 0;
+      let chunks = [];
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        receivedLength += value.length;
+        if (contentLength) {
+          const percent = Math.round((receivedLength / contentLength) * 100);
+          setFileDownloadProgress(percent);
+        }
+      }
+
+      const blob = new Blob(chunks);
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.setAttribute('download', fileName);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(blobUrl);
+      if (showToast) showToast('Tải về máy thành công!', 'success');
+    } catch (err) {
+      console.error('Lỗi khi tải file:', err);
+      if (showToast) showToast('Không thể tải file về máy: ' + err.message, 'error');
+    } finally {
+      setFileDownloading(false);
+      setFileDownloadProgress(0);
+      setFileDownloadName('');
+    }
+  }, [showToast]);
+
   // Lưu video về máy trực tiếp (không qua trình tải của Chrome nếu ở local)
   const handleDownloadMergedVideo = useCallback(async () => {
     if (!mergedVideo || downloadingVideo) return;
@@ -286,9 +337,31 @@ export default function VideoDownloadView({ showToast }) {
 
     // Nếu video đang ở local server, tải trực tiếp qua trình duyệt của người dùng
     if (mergedVideo?.storageProvider === 'local' && mergedVideo?.localFileName) {
+      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
+      if (isLocalhost && !isMobile) {
+        try {
+          setDownloadingVideo(true);
+          const res = await api.saveToLocalComputer(mergedVideo.localFileName);
+          if (res?.success) {
+            showToast?.('Đã sao chép video vào thư mục Downloads của máy tính!', 'success');
+            return;
+          }
+        } catch (err) {
+          console.warn('Lỗi local-save, chuyển sang tải trình duyệt:', err);
+        } finally {
+          setDownloadingVideo(false);
+        }
+      }
+
       const localUrl = `/api/media/local/${encodeURIComponent(mergedVideo.localFileName)}`;
-      window.location.href = localUrl.includes('?') ? `${localUrl}&dl=1` : `${localUrl}?dl=1`;
-      showToast?.(`Đang tải video về máy: ${fileName}`, 'success');
+      if (isMobile) {
+        window.location.href = localUrl.includes('?') ? `${localUrl}&dl=1` : `${localUrl}?dl=1`;
+        showToast?.(`Đang tải video về điện thoại: ${fileName}`, 'success');
+      } else {
+        downloadFileWithProgress(localUrl, fileName);
+      }
       return;
     }
 
@@ -300,7 +373,7 @@ export default function VideoDownloadView({ showToast }) {
     }
     window.open(remoteUrl, '_blank');
     showToast?.(`Đang mở video: ${fileName}`, 'success');
-  }, [mergedVideo, downloadingVideo, showToast]);
+  }, [mergedVideo, downloadingVideo, showToast, downloadFileWithProgress]);
 
   useEffect(() => () => {
     extractAbortRef.current?.abort();
@@ -373,6 +446,7 @@ export default function VideoDownloadView({ showToast }) {
 
     setUrl(targetUrl);
     setExtracting(true);
+    setDownloadProgress(0);
     setExtractError('');
     setExtractWarning('');
     setEditError('');
@@ -383,8 +457,20 @@ export default function VideoDownloadView({ showToast }) {
     setOriginalAudioAsset(null);
     setMergedVideo(null);
 
+    const downloadId = 'dl_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    const progressInterval = setInterval(async () => {
+      try {
+        const progResult = await api.getDownloadProgress(downloadId);
+        if (progResult?.success && progResult.progress !== null) {
+          setDownloadProgress(progResult.progress);
+        }
+      } catch (err) {
+        console.warn('Error polling progress:', err);
+      }
+    }, 800);
+
     try {
-      const result = await api.extractAudio(targetUrl, extractType, controller.signal);
+      const result = await api.extractAudio(targetUrl, extractType, downloadId, controller.signal);
       if (requestId !== extractSequenceRef.current) return;
 
       if (extractType === 'audio') {
@@ -398,8 +484,26 @@ export default function VideoDownloadView({ showToast }) {
 
         // Kích hoạt tải về máy trực tiếp qua trình duyệt của người dùng
         if (result.audio.localFileName) {
+          const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+          const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
           const localUrl = `/api/media/local/${encodeURIComponent(result.audio.localFileName)}`;
-          window.location.href = `${localUrl}?dl=1`;
+          const fileName = result.audio.fileName || 'audio.mp3';
+
+          if (isLocalhost && !isMobile) {
+            api.saveToLocalComputer(result.audio.localFileName)
+              .then(res => {
+                if (res?.success) {
+                  showToast?.('Đã tự động lưu âm thanh vào thư mục Downloads!', 'success');
+                }
+              })
+              .catch(err => {
+                downloadFileWithProgress(localUrl, fileName);
+              });
+          } else if (isMobile) {
+            window.location.href = localUrl.includes('?') ? `${localUrl}&dl=1` : `${localUrl}?dl=1`;
+          } else {
+            downloadFileWithProgress(localUrl, fileName);
+          }
         }
 
         if (showToast) showToast('Đã trích xuất và tải âm thanh về máy thành công!', 'success');
@@ -432,8 +536,26 @@ export default function VideoDownloadView({ showToast }) {
 
         // Kích hoạt tải về máy trực tiếp qua trình duyệt của người dùng
         if (result.video.localFileName) {
+          const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+          const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
           const localUrl = `/api/media/local/${encodeURIComponent(result.video.localFileName)}`;
-          window.location.href = `${localUrl}?dl=1`;
+          const fileName = result.video.fileName || 'video.mp4';
+
+          if (isLocalhost && !isMobile) {
+            api.saveToLocalComputer(result.video.localFileName)
+              .then(res => {
+                if (res?.success) {
+                  showToast?.('Đã tự động lưu video vào thư mục Downloads!', 'success');
+                }
+              })
+              .catch(err => {
+                downloadFileWithProgress(localUrl, fileName);
+              });
+          } else if (isMobile) {
+            window.location.href = localUrl.includes('?') ? `${localUrl}&dl=1` : `${localUrl}?dl=1`;
+          } else {
+            downloadFileWithProgress(localUrl, fileName);
+          }
         }
 
         setExtractWarning(result.warning || '');
@@ -447,8 +569,10 @@ export default function VideoDownloadView({ showToast }) {
       setExtractError(message);
       if (showToast) showToast(message, 'error');
     } finally {
+      clearInterval(progressInterval);
       if (requestId === extractSequenceRef.current) {
         setExtracting(false);
+        setDownloadProgress(null);
         extractAbortRef.current = null;
       }
     }
@@ -488,6 +612,7 @@ export default function VideoDownloadView({ showToast }) {
     extractAbortRef.current = null;
     setUrl('');
     setExtracting(false);
+    setDownloadProgress(null);
     setExtractError('');
     setExtractWarning('');
     setAudioAsset(null);
@@ -996,6 +1121,20 @@ export default function VideoDownloadView({ showToast }) {
                   Trích xuất
                 </button>
               </div>
+              {extracting && downloadProgress !== null && (
+                <div className="mt-2 flex flex-col gap-1.5 p-1">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-[var(--text-muted)] font-medium">Đang tải xuống...</span>
+                    <span className="text-indigo-400 font-bold">{downloadProgress.toFixed(1)}%</span>
+                  </div>
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-[var(--input-bg)] border border-[var(--input-border)]">
+                    <div 
+                      className="h-full bg-gradient-to-r from-violet-500 to-indigo-500 transition-all duration-300 ease-out" 
+                      style={{ width: `${downloadProgress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
               <WarningNotice message={extractWarning} />
               <ErrorNotice message={extractError} />
             </form>
@@ -1533,6 +1672,32 @@ export default function VideoDownloadView({ showToast }) {
           </div>
         </div>
       </div>
+      {fileDownloading && (
+        <div className="fixed bottom-6 right-6 z-50 w-80 rounded-2xl border border-[var(--input-border)] bg-[color:var(--card-bg,rgba(20,20,25,0.95))] backdrop-blur-md p-4 shadow-2xl shadow-black/40 animate-fade-in-up">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-600/10 text-indigo-400">
+              <Download size={16} className="animate-bounce" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h4 className="truncate text-xs font-bold text-[var(--text-main)]">
+                Đang tải về máy tính
+              </h4>
+              <p className="truncate text-[10px] text-[var(--text-muted)]" title={fileDownloadName}>
+                {fileDownloadName}
+              </p>
+            </div>
+            <span className="text-xs font-bold text-indigo-400">
+              {fileDownloadProgress}%
+            </span>
+          </div>
+          <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-[var(--input-bg)]">
+            <div 
+              className="h-full bg-gradient-to-r from-violet-500 to-indigo-500 transition-all duration-150 ease-out" 
+              style={{ width: `${fileDownloadProgress}%` }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
