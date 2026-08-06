@@ -160,42 +160,106 @@ async function extractAudio(req, res) {
   let workspace = '';
   let releaseSlot = () => {};
   const abortContext = createRequestAbortContext(req, res);
+  const type = req.body?.type || 'audio'; // 'audio', 'video_silent', 'video_full'
   try {
     releaseSlot = acquireProcessingSlot();
     const sourceUrl = req.body?.url || req.body?.sourceUrl;
     const owner = ownerFromRequest(req);
     workspace = await mediaStudioService.createWorkspace();
 
-    const extracted = await mediaStudioService.extractAudioFromUrl(
-      sourceUrl,
-      workspace,
-      undefined,
-      abortContext.signal
-    );
-    mediaStudioService.throwIfAborted(abortContext.signal);
-    const fileName = mediaStudioService.makeSafeFileName(`audio_${owner}`, '.mp3');
-    const persisted = await mediaStudioService.persistMediaFile(extracted.filePath, {
-      folder: mediaStudioService.getOwnerFolder(owner, 'audio'),
-      fileName,
-      prefix: `audio_${owner}`,
-      kind: 'audio',
-      contentType: 'audio/mpeg',
-      duration: extracted.probe.duration,
-      signal: abortContext.signal,
-      forceLocal: true
-    });
+    if (type === 'audio') {
+      const extracted = await mediaStudioService.extractAudioFromUrl(
+        sourceUrl,
+        workspace,
+        undefined,
+        abortContext.signal
+      );
+      mediaStudioService.throwIfAborted(abortContext.signal);
+      const fileName = mediaStudioService.makeSafeFileName(`audio_${owner}`, '.mp3');
+      const persisted = await mediaStudioService.persistMediaFile(extracted.filePath, {
+        folder: mediaStudioService.getOwnerFolder(owner, 'audio'),
+        fileName,
+        prefix: `audio_${owner}`,
+        kind: 'audio',
+        contentType: 'audio/mpeg',
+        duration: extracted.probe.duration,
+        signal: abortContext.signal,
+        forceLocal: true
+      });
 
-    return res.json({
-      success: true,
-      audio: {
-        ...persisted.asset,
-        sourceUrl: extracted.sourceUrl
-      },
-      video: null,
-      warning: persisted.warning
-    });
+      return res.json({
+        success: true,
+        audio: {
+          ...persisted.asset,
+          sourceUrl: extracted.sourceUrl
+        },
+        video: null,
+        warning: persisted.warning
+      });
+    } else if (type === 'video_silent') {
+      const extracted = await mediaStudioService.extractVideoNoAudioFromUrl(
+        sourceUrl,
+        workspace,
+        undefined,
+        abortContext.signal
+      );
+      mediaStudioService.throwIfAborted(abortContext.signal);
+      const fileName = mediaStudioService.makeSafeFileName(`video_${owner}_silent`, '.mp4');
+      const persisted = await mediaStudioService.persistMediaFile(extracted.filePath, {
+        folder: mediaStudioService.getOwnerFolder(owner, 'videos'),
+        fileName,
+        prefix: `video_${owner}`,
+        kind: 'video',
+        contentType: 'video/mp4',
+        duration: extracted.probe.duration,
+        signal: abortContext.signal,
+        forceLocal: true
+      });
+
+      return res.json({
+        success: true,
+        audio: null,
+        video: {
+          ...persisted.asset,
+          sourceUrl: extracted.sourceUrl
+        },
+        warning: persisted.warning
+      });
+    } else if (type === 'video_full') {
+      const extracted = await mediaStudioService.extractFullVideoFromUrl(
+        sourceUrl,
+        workspace,
+        undefined,
+        abortContext.signal
+      );
+      mediaStudioService.throwIfAborted(abortContext.signal);
+      const fileName = mediaStudioService.makeSafeFileName(`video_${owner}_full`, '.mp4');
+      const persisted = await mediaStudioService.persistMediaFile(extracted.filePath, {
+        folder: mediaStudioService.getOwnerFolder(owner, 'videos'),
+        fileName,
+        prefix: `video_${owner}`,
+        kind: 'video',
+        contentType: 'video/mp4',
+        duration: extracted.probe.duration,
+        signal: abortContext.signal,
+        forceLocal: true
+      });
+
+      return res.json({
+        success: true,
+        audio: null,
+        video: {
+          ...persisted.asset,
+          sourceUrl: extracted.sourceUrl
+        },
+        warning: persisted.warning
+      });
+    } else {
+      throw new Error('Loại trích xuất không hợp lệ');
+    }
   } catch (error) {
-    return sendError(res, error, 'Tách âm thanh thất bại');
+    const actionLabel = type === 'audio' ? 'Tách âm thanh' : type === 'video_silent' ? 'Tách video câm' : 'Tải video';
+    return sendError(res, error, `${actionLabel} thất bại`);
   } finally {
     await mediaStudioService.cleanupWorkspace(workspace);
     abortContext.dispose();
@@ -497,7 +561,8 @@ async function mergeMedia(req, res) {
       kind: 'video',
       contentType: 'video/mp4',
       duration: merged.probe.duration,
-      signal: abortContext.signal
+      signal: abortContext.signal,
+      forceLocal: true  // Giữ local để user tải về máy trực tiếp; bấm "Lưu Supabase" nếu cần
     });
 
     return res.json({
@@ -568,9 +633,11 @@ async function serveLocalMedia(req, res) {
     res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
     res.setHeader('Cache-Control', 'private, max-age=3600');
     const asciiName = fileName.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
+    // ?dl=1 → attachment (tải về máy); không có → inline (cho video player preview)
+    const disposition = req.query?.dl === '1' ? 'attachment' : 'inline';
     res.setHeader(
       'Content-Disposition',
-      `inline; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`
+      `${disposition}; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`
     );
 
     if (range === false) {
@@ -825,5 +892,45 @@ module.exports = {
   mergeMedia,
   serveLocalMedia,
   persistRemoteMedia,
-  deleteMedia
+  deleteMedia,
+  saveToLocalComputer
 };
+
+async function saveToLocalComputer(req, res) {
+  try {
+    const { localFileName } = req.body;
+    if (!localFileName) {
+      return res.status(400).json({ success: false, error: 'Thiếu tên file' });
+    }
+    const sourcePath = path.join(mediaStudioService.LOCAL_MEDIA_DIR, localFileName);
+    if (!fs.existsSync(sourcePath)) {
+      return res.status(404).json({ success: false, error: 'Không tìm thấy file nguồn trên server' });
+    }
+
+    const os = require('os');
+    const { exec } = require('child_process');
+    const homeDir = os.homedir();
+    let destDir = path.join(homeDir, 'Downloads');
+    if (!fs.existsSync(destDir)) {
+      destDir = path.join(homeDir, 'Desktop');
+    }
+
+    const destPath = path.join(destDir, localFileName);
+    await fs.promises.copyFile(sourcePath, destPath);
+
+    // Mở và bôi đen file trong Finder trên macOS
+    exec(`open -R "${destPath}"`, (err) => {
+      if (err) console.error('[LocalSave] Lỗi open -R:', err);
+    });
+
+    return res.json({
+      success: true,
+      message: `Đã sao chép trực tiếp vào thư mục Downloads`,
+      destPath
+    });
+  } catch (error) {
+    console.error('[LocalSave] Lỗi:', error);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+}
+
