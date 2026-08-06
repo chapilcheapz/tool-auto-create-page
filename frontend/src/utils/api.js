@@ -282,3 +282,17 @@ export async function deleteMedia(body) {
   });
   return safeJsonResponse(response);
 }
+
+export async function googleLogin(email, password, proxy = '') {
+  const response = await authFetch('/api/config/google-login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password, proxy })
+  });
+  return safeJsonResponse(response);
+}
+
+export async function getGoogleStatus() {
+  const response = await authFetch('/api/config/google-status');
+  return safeJsonResponse(response);
+}

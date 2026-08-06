@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, RefreshCw, ShieldCheck, Loader2, Plus, Trash2, Upload, Video, CheckCircle, AlertTriangle, KeyRound, UserCheck, Lock } from 'lucide-react';
+import { X, RefreshCw, ShieldCheck, Loader2, Plus, Trash2, Upload, Video, CheckCircle, AlertTriangle, KeyRound, UserCheck, Lock, LogIn, Mail } from 'lucide-react';
 import * as api from '../utils/api';
 
 export default function SettingsModal({ isOpen, onClose, showToast, onCookieChange, initialCookie }) {
-  const [activeTab, setActiveTab] = useState('cookie'); // 'cookie' | 'login' | 'yttiktok' | 'password'
+  const [activeTab, setActiveTab] = useState('cookie'); // 'cookie' | 'login' | 'yttiktok' | 'google' | 'password'
   
   // States for cookie tab
   const [cookies, setCookies] = useState(['']);
@@ -13,6 +13,13 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
   const [fb2fa, setFb2fa] = useState('');
   const [fbProxy, setFbProxy] = useState(localStorage.getItem('fb_proxy') || '');
   const [fbLoginLoading, setFbLoginLoading] = useState(false);
+
+  // States for Google login tab
+  const [googleEmail, setGoogleEmail] = useState('');
+  const [googlePassword, setGooglePassword] = useState('');
+  const [googleProxy, setGoogleProxy] = useState(localStorage.getItem('google_proxy') || '');
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [googleStatus, setGoogleStatus] = useState(null);
 
   // States for system password tab
   const [currentPassword, setCurrentPassword] = useState('');
@@ -71,8 +78,49 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
       fetchPlatformStatus('tiktok');
       fetchPlatformContent('youtube');
       fetchPlatformContent('tiktok');
+      fetchGoogleStatus();
     }
   }, [isOpen]);
+
+  const fetchGoogleStatus = async () => {
+    try {
+      const data = await api.getGoogleStatus();
+      if (data.success) {
+        setGoogleStatus(data);
+      }
+    } catch {}
+  };
+
+  const handleGoogleLogin = async (e) => {
+    e.preventDefault();
+    const email = googleEmail.trim();
+    const password = googlePassword.trim();
+    const proxy = googleProxy.trim();
+
+    if (!email || !password) {
+      showToast('Vui lòng nhập Email và Mật khẩu Google!', 'error');
+      return;
+    }
+
+    setGoogleLoading(true);
+    showToast('Đang tiến hành tự động đăng nhập Google qua Playwright Stealth Mode...', 'success');
+    localStorage.setItem('google_proxy', proxy);
+
+    try {
+      const res = await api.googleLogin(email, password, proxy);
+      if (res.success) {
+        showToast(res.message || 'Đăng nhập Google thành công!', 'success');
+        await fetchGoogleStatus();
+        fetchPlatformStatus('youtube');
+      } else {
+        showToast(res.error || 'Đăng nhập Google thất bại.', 'error');
+      }
+    } catch (err) {
+      showToast(`Lỗi: ${err.message}`, 'error');
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
 
   const fetchPlatformStatus = async (platform) => {
     try {
@@ -502,6 +550,14 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
             </button>
             <button 
               type="button"
+              onClick={() => setActiveTab('google')}
+              className={activeTab === 'google' ? activeTabClass : inactiveTabClass}
+            >
+              <LogIn size={16} />
+              <span>Đăng nhập Google</span>
+            </button>
+            <button 
+              type="button"
               onClick={() => setActiveTab('password')}
               className={activeTab === 'password' ? activeTabClass : inactiveTabClass}
             >
@@ -816,6 +872,89 @@ export default function SettingsModal({ isOpen, onClose, showToast, onCookieChan
                   )}
                 </button>
               </div>
+            </form>
+          )}
+
+          {/* Panel Google Login */}
+          {activeTab === 'google' && (
+            <form onSubmit={handleGoogleLogin} className="space-y-4 animate-in fade-in duration-200">
+              <div className="flex items-center justify-between p-3 rounded-xl bg-blue-500/10 border border-blue-500/20 mb-2">
+                <div className="flex items-center gap-2">
+                  <Mail size={16} className="text-blue-400" />
+                  <span className="text-xs font-bold text-[var(--text-main)]">Trạng thái phiên Google</span>
+                </div>
+                {googleStatus?.active ? (
+                  <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg">
+                    <CheckCircle size={12} /> Đã kết nối Session
+                  </span>
+                ) : (
+                  <span className="text-xs font-semibold text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-lg">
+                    Chưa đăng nhập
+                  </span>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <label className="text-xs font-semibold text-[var(--text-muted)]" htmlFor="inputGoogleEmail">Email / Tài khoản Google</label>
+                <input 
+                  type="email" 
+                  id="inputGoogleEmail"
+                  className="w-full bg-[var(--input-bg)] border border-[var(--input-border)] rounded-lg px-4 py-2 text-sm text-[var(--text-main)] focus:outline-none focus:border-blue-400 transition-all outline-none"
+                  placeholder="name@gmail.com..."
+                  value={googleEmail}
+                  onChange={(e) => setGoogleEmail(e.target.value)}
+                  disabled={googleLoading}
+                  required
+                />
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <label className="text-xs font-semibold text-[var(--text-muted)]" htmlFor="inputGooglePassword">Mật khẩu Google</label>
+                <input 
+                  type="password" 
+                  id="inputGooglePassword"
+                  className="w-full bg-[var(--input-bg)] border border-[var(--input-border)] rounded-lg px-4 py-2 text-sm text-[var(--text-main)] focus:outline-none focus:border-blue-400 transition-all outline-none"
+                  placeholder="Nhập mật khẩu Google..."
+                  value={googlePassword}
+                  onChange={(e) => setGooglePassword(e.target.value)}
+                  disabled={googleLoading}
+                  required
+                />
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <label className="text-xs font-semibold text-[var(--text-muted)]" htmlFor="inputGoogleProxy">Proxy IP (Tùy chọn cho Cloud)</label>
+                <input 
+                  type="text" 
+                  id="inputGoogleProxy"
+                  className="w-full bg-[var(--input-bg)] border border-[var(--input-border)] rounded-lg px-4 py-2 text-sm text-[var(--text-main)] focus:outline-none focus:border-blue-400 transition-all outline-none"
+                  placeholder="Định dạng: IP:Port (Nếu có)"
+                  value={googleProxy}
+                  onChange={(e) => setGoogleProxy(e.target.value)}
+                  disabled={googleLoading}
+                />
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="submit"
+                  disabled={googleLoading}
+                  className="bg-blue-600 hover:bg-blue-500 text-white py-2.5 px-5 rounded-xl text-xs font-semibold transition-all active:scale-98 cursor-pointer border-none flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {googleLoading ? (
+                    <>
+                      <RefreshCw size={14} className="animate-spin" />
+                      <span>Đang đăng nhập Google qua Stealth Mode...</span>
+                    </>
+                  ) : (
+                    <span>Đăng nhập &amp; Lưu Session Google</span>
+                  )}
+                </button>
+              </div>
+
+              <p className="text-[11px] text-[var(--text-muted)] leading-relaxed">
+                💡 Hệ thống sẽ tự động bật Playwright Stealth Mode để bypass hệ thống kiểm tra bot của Google, xuất cookie và tự động đồng bộ sang cho YouTube.
+              </p>
             </form>
           )}
 
